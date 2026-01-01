@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>수입통관 통합 조회 시스템</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        /* [기존 스타일 유지] */
+        body { font-family: 'Malgun Gothic', sans-serif; margin: 10px 20px; background-color: #f5f7fa; color: #333; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 8px; margin: 0 0 10px 0; font-size: 20px; }
+        .search-container { background: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #ddd; }
+        .filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 5px; }
+        .filter-label { font-size: 13px; font-weight: bold; width: 55px; }
+        .date-input { padding: 5px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        .search-input { flex: 1; padding: 7px; border: 2px solid #0056b3; border-radius: 4px; font-size: 13px; min-width: 300px; }
+        .btn-search { padding: 7px 20px; background-color: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
+        .status-buttons { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
+        .btn-filter { padding: 6px 12px; font-size: 12px; border: 1px solid #ccc; background: #fff; border-radius: 20px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
+        .btn-filter:hover { background: #eee; }
+        .btn-filter.active { background: #0056b3; color: #fff; border-color: #0056b3; }
+        .info-pagination-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .pagination { display: flex; gap: 4px; }
+        .page-btn { padding: 4px 8px; border: 1px solid #ddd; background: #fff; cursor: pointer; font-size: 11px; border-radius: 3px; min-width: 30px; }
+        .page-btn.active { background: #0056b3; color: #fff; border-color: #0056b3; font-weight: bold; }
+        .page-btn:disabled { background: #f5f5f5; color: #ccc; cursor: default; border-color: #eee; }
+        .table-wrapper { max-height: 400px; overflow-y: auto; border: 1px solid #ddd; margin-bottom: 15px; border-radius: 4px; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        th { position: sticky; top: 0; background: #eee; z-index: 10; font-size: 13px; }
+        .col-date { width: 120px; }
+        .col-decl { width: 180px; }
+        .col-hbl  { width: 180px; }
+        .col-trader { width: auto; }
+        .col-status { width: 100px; }
+        tr:hover td { background-color: #f1f7ff; cursor: pointer; }
+        .selected td { background-color: #d1e7ff !important; font-weight: bold; }
+        .detail-box { border: 2px solid #0056b3; border-radius: 8px; padding: 12px; background: #fff; margin-top: 10px; }
+        .detail-header { font-size: 16px; font-weight: bold; color: #0056b3; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .detail-grid { display: grid; grid-template-columns: 130px 1fr 130px 1fr; border-top: 1px solid #ddd; border-left: 1px solid #ddd; }
+        .detail-label { background: #f8f9fa; padding: 8px; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; font-weight: bold; font-size: 12px; }
+        .detail-content { padding: 8px; border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; font-size: 13px; background: #fff; min-height: 18px; }
+        .reason-label { background: #fff5f5 !important; color: #e03131; }
+        .reason-content { color: #e03131; font-weight: bold; }
+        .full-row-content { grid-column: span 3; }
+        .memo-input { width: 75%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-family: inherit; font-size: 13px; }
+        .save-status { font-size: 11px; color: green; font-weight: normal; display: none; }
+        .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; min-width: 45px; }
+        .status-REPAIR { background: #d4edda; color: #155724; }
+        .status-WAIT   { background: #fff3bf; color: #856404; }
+        .status-ERROR  { background: #f8d7da; color: #721c24; }
+        .status-HOLD   { background: #fcc2d7; color: #a61e4d; }
+        .status-BEFORE { background: #e9ecef; color: #495057; }
+        .status-DEFAULT { background: #e9ecef; color: #495057; }
+
+        /* [새로 추가] 알림 팝업 스타일 */
+        #alert-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; justify-content: center; align-items: center; z-index: 10000; }
+        .modal-box { background: white; width: 500px; padding: 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .modal-title { font-size: 18px; font-weight: bold; color: #d63301; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
+        .modal-list { max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 6px; margin-bottom: 15px; }
+        .modal-item { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #eee; }
+        .modal-item:last-child { border-bottom: none; }
+        .modal-item span { font-size: 13px; font-weight: bold; }
+        .btn-confirm-mini { padding: 4px 8px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; }
+        .btn-close-modal { width: 100%; padding: 10px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+
+        #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0056b3; display: flex; justify-content: center; align-items: center; z-index: 9999; }
+        .login-box { background: white; padding: 40px; border-radius: 12px; width: 320px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+        .login-input { width: 100%; padding: 12px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        .btn-login { width: 100%; padding: 12px; background: #0056b3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        #main-app { display: none; }
+    </style>
+</head>
+<body>
+
+<div id="alert-modal">
+    <div class="modal-box">
+        <div class="modal-title">📢 미확인 메모 알림</div>
+        <div id="modal-list-content" class="modal-list"></div>
+        <button class="btn-close-modal" onclick="closeAlertModal()">닫기</button>
+    </div>
+</div>
+
+<div id="login-overlay">
+    <div class="login-box">
+        <h2 style="border:none; margin-bottom:20px;">시스템 로그인</h2>
+        <input type="email" id="email" class="login-input" placeholder="이메일">
+        <input type="password" id="pw" class="login-input" placeholder="비밀번호">
+        <button onclick="handleLogin()" class="btn-login" id="login-btn">접속하기</button>
+    </div>
+</div>
+
+<div id="main-app" class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>📦 수입통관 통합 조회</h2>
+        <button onclick="location.reload()" style="padding:5px 10px; cursor:pointer; font-size:12px;">로그아웃</button>
+    </div>
+    
+    <div class="search-container">
+        <div class="filter-row">
+            <span class="filter-label">기간</span>
+            <input type="date" id="start-date" class="date-input">
+            <span>~</span>
+            <input type="date" id="end-date" class="date-input">
+        </div>
+        <div class="filter-row">
+            <span class="filter-label">검색어</span>
+            <input type="text" id="search-input" class="search-input" placeholder="신고번호, HBL번호 입력 후 엔터">
+            <button onclick="handleSearch()" class="btn-search">검색</button>
+        </div>
+    </div>
+
+    <div class="status-buttons">
+        <button class="btn-filter active" onclick="setStatusFilter('ALL', this)">전체</button>
+        <button class="btn-filter" onclick="setStatusFilter('BEFORE', this)">신고전</button>
+        <button class="btn-filter" onclick="setStatusFilter('REPAIR', this)">수리</button>
+        <button class="btn-filter" onclick="setStatusFilter('WAIT', this)">수리전</button>
+        <button class="btn-filter" onclick="setStatusFilter('ERROR', this)">오류</button>
+        <button class="btn-filter" onclick="setStatusFilter('HOLD', this)">미결</button>
+        <button class="btn-filter" onclick="setStatusFilter('ANIMAL', this)">동물</button>
+        <button class="btn-filter" onclick="setStatusFilter('PLANT', this)">식물</button>
+    </div>
+
+    <div class="info-pagination-row">
+        <p style="font-size: 12px; color: #666; margin: 0;">
+            조회 결과: <span id="count" style="font-weight:bold; color:#0056b3;">0</span>건 
+            (페이지: <span id="current-page-num">1</span>)
+        </p>
+        <div id="pagination" class="pagination"></div>
+    </div>
+
+    <div class="table-wrapper">
+        <table id="data-table">
+            <thead>
+                <tr>
+                    <th class="col-date">신고일자</th>
+                    <th class="col-decl">신고번호</th>
+                    <th class="col-hbl">HBL번호</th>
+                    <th class="col-trader">수입자명</th>
+                    <th class="col-status">수신상태</th>
+                </tr>
+            </thead>
+            <tbody id="list-body"></tbody>
+        </table>
+    </div>
+
+    <div class="detail-box">
+        <div class="detail-header">
+            <span>🔍 상세 내역 정보</span>
+            <span id="save-status" class="save-status">✅ 메모 저장완료</span>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-label">MBL번호</div><div id="det_mbl" class="detail-content"></div>
+            <div class="detail-label">HBL번호</div><div id="det_hbl" class="detail-content"></div>
+            <div class="detail-label">수입자명</div><div id="det_trader" class="detail-content"></div>
+            <div class="detail-label">수신상태</div><div id="det_status" class="detail-content"></div>
+            <div class="detail-label">총 중량</div><div id="det_weight" class="detail-content"></div>
+            <div class="detail-label">결제금액</div><div id="det_amount" class="detail-content"></div>
+            <div class="detail-label reason-label">미결/보완 사유</div>
+            <div id="det_reason" class="detail-content reason-content full-row-content"></div>
+            <div class="detail-label">비고(메모)</div>
+            <div class="detail-content full-row-content">
+                <input type="text" id="memo-input" class="memo-input" placeholder="메모 입력 후 자동 저장" disabled>
+                <button id="btn-confirm-memo" style="padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; margin-left: 8px; display:none;">관리자 확인</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const SUPABASE_URL = "https://rxjjtwtwqisyzuwfbsfm.supabase.co".trim();
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4amp0d3R3cWlzeXp1d2Zic2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzQ1MzEsImV4cCI6MjA4MjMxMDUzMX0.XZWjh_RklpRvVPPbgyciKsqJQdJMvD4AewmJBl_zot0".replace(/\s/g, "");
+
+    const { createClient } = supabase;
+    const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { storage: window.sessionStorage, persistSession: true }
+    });
+
+    let allData = [];
+    let filteredData = [];
+    let currentStatusFilter = 'ALL';
+    let currentPage = 1;
+    const itemsPerPage = 100;
+
+    async function handleLogin() {
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('pw').value;
+        const btn = document.getElementById('login-btn');
+        if(!email || !password) return alert("아이디와 비밀번호를 입력하세요.");
+        btn.disabled = true; btn.innerText = "접속 중...";
+        try {
+            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
+            if (error) throw error;
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-app').style.display = 'block';
+            init();
+        } catch (err) {
+            alert("로그인 실패: " + err.message);
+            btn.disabled = false; btn.innerText = "접속하기";
+        }
+    }
+
+    async function loadAllData() {
+        let results = [];
+        let from = 0;
+        const step = 1000;
+        let hasMore = true;
+
+        while (hasMore) {
+            const { data, error } = await _supabase
+                .from('customs_clearance')
+                .select('*')
+                .range(from, from + step - 1)
+                .order('issue_date', { ascending: false });
+
+            if (error) {
+                console.error("Data Load Error:", error);
+                break;
+            }
+            results = results.concat(data);
+            if (data.length < step) hasMore = false;
+            else from += step;
+        }
+        return results;
+    }
+
+    async function init() {
+        allData = await loadAllData();
+        
+        // [수정] 팝업 대신 전용 모달 실행
+        showUnconfirmedAlerts();
+        
+        const today = new Date();
+        const lastWeek = new Date();
+        lastWeek.setDate(today.getDate() - 7); 
+        
+        document.getElementById('start-date').value = lastWeek.toISOString().split('T')[0];
+        document.getElementById('end-date').value = today.toISOString().split('T')[0];
+        handleSearch();
+    }
+
+    // [추가] 미확인 메모 리스트 모달 표시 함수
+    function showUnconfirmedAlerts() {
+        const unconfirmed = allData.filter(d => d.memo && d.memo.trim() !== "" && !d.checked);
+        if (unconfirmed.length === 0) return;
+
+        const modal = document.getElementById('alert-modal');
+        const listContent = document.getElementById('modal-list-content');
+        listContent.innerHTML = '';
+
+        unconfirmed.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'modal-item';
+            div.innerHTML = `
+                <div>
+                    <span>${item.hbl_no}</span><br>
+                    <small style="color:#666">${item.memo}</small>
+                </div>
+                <button class="btn-confirm-mini" onclick="confirmInModal('${item.decl_no}', this)">확인</button>
+            `;
+            listContent.appendChild(div);
+        });
+
+        modal.style.display = 'flex';
+    }
+
+    // [추가] 모달 내 확인 버튼 처리
+    async function confirmInModal(declNo, btn) {
+        const { error } = await _supabase.from('customs_clearance').update({ checked: true }).eq('decl_no', declNo);
+        if (!error) {
+            const target = allData.find(d => d.decl_no === declNo);
+            if (target) target.checked = true;
+            btn.parentElement.style.background = '#f8f9fa';
+            btn.parentElement.style.opacity = '0.5';
+            btn.remove();
+        }
+    }
+
+    function closeAlertModal() {
+        document.getElementById('alert-modal').style.display = 'none';
+    }
+
+    function setStatusFilter(status, btn) {
+        currentStatusFilter = status;
+        document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentPage = 1;
+        handleSearch();
+    }
+
+    function getDisplayStatus(rawStatus) {
+        const s = (rawStatus || '').trim();
+        if (s === '진행중' || s === '신고전') return '신고전';
+        if (s.match(/선별|제출|전제|신고접수|대기/)) return '대기';
+        if (s.match(/서보|보완|서변|미결|보류/)) return '미결';
+        if (s === '수리') return '수리';
+        return s || '신고전';
+    }
+
+    function getBadgeClass(statusText) {
+        if (statusText === '수리') return 'status-REPAIR';
+        if (statusText === '대기') return 'status-WAIT';
+        if (statusText === '미결') return 'status-HOLD';
+        if (statusText === '신고전') return 'status-BEFORE';
+        if (statusText.includes('오류')) return 'status-ERROR';
+        return 'status-DEFAULT';
+    }
+
+    function handleSearch() {
+        const startDateRaw = document.getElementById('start-date').value;
+        const endDateRaw = document.getElementById('end-date').value;
+        const startVal = startDateRaw ? startDateRaw.replace(/-/g, "") : "";
+        const endVal = endDateRaw ? endDateRaw.replace(/-/g, "") : "";
+        
+        const searchInput = document.getElementById('search-input').value.trim().toLowerCase();
+        
+        filteredData = allData.filter(d => {
+            const dbDate = String(d.issue_date || "").replace(/[^0-9]/g, "").substring(0, 8);
+            if (startVal && dbDate < startVal) return false;
+            if (endVal && dbDate > endVal) return false;
+
+            if (searchInput) {
+                const match = (d.decl_no && d.decl_no.toLowerCase().includes(searchInput)) || 
+                              (d.hbl_no && d.hbl_no.toLowerCase().includes(searchInput)) || 
+                              (d.trader_name && d.trader_name.toLowerCase().includes(searchInput));
+                if (!match) return false;
+            }
+
+            if (currentStatusFilter !== 'ALL') {
+                const status = (d.status || '').trim();
+                const fileNo1 = (d.file_no1 || '').trim();
+                const displayStatus = getDisplayStatus(status);
+
+                if (currentStatusFilter === 'BEFORE') return displayStatus === '신고전';
+                if (currentStatusFilter === 'REPAIR') return status === '수리';
+                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
+                if (currentStatusFilter === 'ERROR') return status.includes('오류');
+                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보/);
+                if (currentStatusFilter === 'ANIMAL') return fileNo1.includes('동검');
+                if (currentStatusFilter === 'PLANT') return fileNo1.includes('식검');
+            }
+            return true;
+        });
+
+        currentPage = 1;
+        renderTable();
+    }
+
+    function renderTable() {
+        const totalItems = filteredData.length;
+        document.getElementById('count').innerText = totalItems.toLocaleString();
+        document.getElementById('current-page-num').innerText = currentPage;
+        const tbody = document.getElementById('list-body');
+        tbody.innerHTML = '';
+        
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        const pageData = filteredData.slice(startIndex, startIndex + itemsPerPage);
+
+        pageData.forEach(row => {
+            const tr = document.createElement('tr');
+            const statusText = getDisplayStatus(row.status);
+            const badgeClass = getBadgeClass(statusText);
+            
+            const dStr = String(row.issue_date || "").replace(/[^0-9]/g, "");
+            const formattedDate = dStr.length >= 8 ? `${dStr.substring(0,4)}-${dStr.substring(4,6)}-${dStr.substring(6,8)}` : dStr;
+
+            tr.innerHTML = `<td>${formattedDate}</td><td>${row.decl_no}</td><td>${row.hbl_no}</td><td style="text-align:left;">${row.trader_name}</td><td><span class="status-badge ${badgeClass}">${statusText}</span></td>`;
+            tr.onclick = () => {
+                document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
+                tr.classList.add('selected');
+                showDetail(row);
+            };
+            tbody.appendChild(tr);
+        });
+        renderPagination(totalItems);
+    }
+
+    function renderPagination(totalItems) {
+        const paginationContainer = document.getElementById('pagination');
+        paginationContainer.innerHTML = '';
+        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+        
+        const prevBtn = document.createElement('button');
+        prevBtn.innerText = '이전'; prevBtn.className = 'page-btn'; prevBtn.disabled = currentPage === 1;
+        prevBtn.onclick = () => { currentPage--; renderTable(); };
+        paginationContainer.appendChild(prevBtn);
+
+        let startPage = Math.max(1, currentPage - 2);
+        let endPage = Math.min(totalPages, startPage + 4);
+        if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
+        for (let i = startPage; i <= endPage; i++) {
+            const btn = document.createElement('button');
+            btn.innerText = i; btn.className = i === currentPage ? 'page-btn active' : 'page-btn';
+            btn.onclick = () => { currentPage = i; renderTable(); };
+            paginationContainer.appendChild(btn);
+        }
+        
+        const nextBtn = document.createElement('button');
+        nextBtn.innerText = '다음'; nextBtn.className = 'page-btn'; nextBtn.disabled = currentPage === totalPages;
+        nextBtn.onclick = () => { currentPage++; renderTable(); };
+        paginationContainer.appendChild(nextBtn);
+    }
+
+    function showDetail(row) {
+        document.getElementById('det_mbl').innerText = row.mbl_no || '-';
+        document.getElementById('det_hbl').innerText = row.hbl_no || '-';
+        document.getElementById('det_trader').innerText = row.trader_name || '-';
+        document.getElementById('det_status').innerText = getDisplayStatus(row.status);
+        document.getElementById('det_weight').innerText = row.weight ? row.weight : '-';
+        document.getElementById('det_amount').innerText = row.amount ? row.amount : '-';
+        
+        const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+        document.getElementById('det_reason').innerText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '특이사항 없음');
+        
+        const memoInput = document.getElementById('memo-input');
+        const confirmBtn = document.getElementById('btn-confirm-memo');
+        
+        memoInput.disabled = false;
+        memoInput.value = row.memo || '';
+        memoInput.onblur = () => saveMemo(row.decl_no, memoInput.value);
+
+        if (row.memo && row.memo.trim() !== "" && !row.checked) {
+            confirmBtn.style.display = 'inline-block';
+            confirmBtn.onclick = () => confirmInPage(row.decl_no);
+        } else {
+            confirmBtn.style.display = 'none';
+        }
+    }
+
+    async function saveMemo(declNo, memoValue) {
+        const statusSpan = document.getElementById('save-status');
+        const { error } = await _supabase.from('customs_clearance').update({ memo: memoValue, checked: false }).eq('decl_no', declNo);
+        if (!error) {
+            statusSpan.style.display = 'inline';
+            setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
+            const target = allData.find(d => d.decl_no === declNo);
+            if(target) { target.memo = memoValue; target.checked = false; }
+        }
+    }
+
+    async function confirmInPage(declNo) {
+        const { error } = await _supabase.from('customs_clearance').update({ checked: true }).eq('decl_no', declNo);
+        if (!error) {
+            const target = allData.find(d => d.decl_no === declNo);
+            if (target) target.checked = true;
+            document.getElementById('btn-confirm-memo').style.display = 'none';
+        }
+    }
+
+    document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
+</script>
+</body>
+</html>
