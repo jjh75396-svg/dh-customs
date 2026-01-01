@@ -93,7 +93,7 @@
 <div id="main-app" class="container">
     <div style="display:flex; justify-content:space-between; align-items:center;">
         <h2>📦 수입통관 통합 조회</h2>
-        <button onclick="location.reload()" style="padding:5px 10px; cursor:pointer; font-size:12px;">로그아웃</button>
+        <button onclick="handleLogout()" style="padding:5px 10px; cursor:pointer; font-size:12px;">로그아웃</button>
     </div>
     
     <div class="search-container">
@@ -172,8 +172,14 @@
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4amp0d3R3cWlzeXp1d2Zic2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzQ1MzEsImV4cCI6MjA4MjMxMDUzMX0.XZWjh_RklpRvVPPbgyciKsqJQdJMvD4AewmJBl_zot0".replace(/\s/g, "");
 
     const { createClient } = supabase;
+    
+    // [수정] storage를 localStorage로 변경하여 새로고침 시에도 유지되게 함
     const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { storage: window.sessionStorage, persistSession: true }
+        auth: { 
+            storage: window.localStorage, 
+            persistSession: true,
+            autoRefreshToken: true
+        }
     });
 
     let allData = [];
@@ -181,6 +187,16 @@
     let currentStatusFilter = 'ALL';
     let currentPage = 1;
     const itemsPerPage = 100;
+
+    // [추가] 페이지 로드 시 기존 세션 확인하여 자동 로그인 처리
+    window.onload = async () => {
+        const { data: { session } } = await _supabase.auth.getSession();
+        if (session) {
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-app').style.display = 'block';
+            init();
+        }
+    };
 
     async function handleLogin() {
         const email = document.getElementById('email').value.trim();
@@ -198,6 +214,12 @@
             alert("로그인 실패: " + err.message);
             btn.disabled = false; btn.innerText = "접속하기";
         }
+    }
+
+    // [추가] 로그아웃 시 세션 삭제
+    async function handleLogout() {
+        await _supabase.auth.signOut();
+        location.reload();
     }
 
     async function loadAllData() {
@@ -226,8 +248,6 @@
 
     async function init() {
         allData = await loadAllData();
-        
-        // [수정] 팝업 대신 전용 모달 실행
         showUnconfirmedAlerts();
         
         const today = new Date();
@@ -239,7 +259,6 @@
         handleSearch();
     }
 
-    // [추가] 미확인 메모 리스트 모달 표시 함수
     function showUnconfirmedAlerts() {
         const unconfirmed = allData.filter(d => d.memo && d.memo.trim() !== "" && !d.checked);
         if (unconfirmed.length === 0) return;
@@ -264,7 +283,6 @@
         modal.style.display = 'flex';
     }
 
-    // [추가] 모달 내 확인 버튼 처리
     async function confirmInModal(declNo, btn) {
         const { error } = await _supabase.from('customs_clearance').update({ checked: true }).eq('decl_no', declNo);
         if (!error) {
