@@ -432,14 +432,12 @@
         memoInput.value = row.memo || '';
         saveBtn.style.display = 'inline-block';
 
-        // 메모 저장 이벤트 연결 (엔터키)
         memoInput.onkeydown = (e) => {
             if (e.key === 'Enter') {
                 saveMemo(row.decl_no, memoInput.value);
             }
         };
 
-        // 메모 저장 이벤트 연결 (저장 버튼)
         saveBtn.onclick = () => saveMemo(row.decl_no, memoInput.value);
 
         if (row.memo && row.memo.trim() !== "" && !row.checked) {
@@ -450,22 +448,32 @@
         }
     }
 
+    // 수정된 saveMemo 함수: 빈 값 처리 및 상태 동기화 로직 포함
     async function saveMemo(declNo, memoValue) {
         const statusSpan = document.getElementById('save-status');
-        const { error } = await _supabase.from('customs_clearance').update({ memo: memoValue, checked: false }).eq('decl_no', declNo);
+        const confirmBtn = document.getElementById('btn-confirm-memo');
+
+        const { error } = await _supabase.from('customs_clearance').update({ 
+            memo: memoValue, 
+            checked: false 
+        }).eq('decl_no', declNo);
+
         if (!error) {
             statusSpan.style.display = 'inline';
             setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
-            const target = allData.find(d => d.decl_no === declNo);
-            if(target) { target.memo = memoValue; target.checked = false; }
             
-            // 관리자 확인 버튼 노출 여부 업데이트 (메모가 있을 때만)
-            const confirmBtn = document.getElementById('btn-confirm-memo');
-            if (memoValue.trim() !== "") {
+            const target = allData.find(d => d.decl_no === declNo);
+            if(target) { 
+                target.memo = memoValue; 
+                target.checked = false; 
+            }
+            
+            // 메모가 삭제되었거나 비어있으면 '관리자 확인' 버튼 숨기기
+            if (!memoValue || memoValue.trim() === "") {
+                confirmBtn.style.display = 'none';
+            } else {
                 confirmBtn.style.display = 'inline-block';
                 confirmBtn.onclick = () => confirmInPage(declNo);
-            } else {
-                confirmBtn.style.display = 'none';
             }
         } else {
             alert("저장 실패: " + error.message);
