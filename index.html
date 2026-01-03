@@ -11,9 +11,12 @@
         .search-container { background: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; border: 1px solid #ddd; }
         .filter-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 5px; }
         .filter-label { font-size: 13px; font-weight: bold; width: 55px; }
-        .date-input { padding: 5px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        .date-input { padding: 5px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 130px; }
         .search-input { flex: 1; padding: 7px; border: 2px solid #0056b3; border-radius: 4px; font-size: 13px; min-width: 300px; }
         .btn-search { padding: 7px 20px; background-color: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; }
+        /* 엑셀 버튼 스타일 */
+        .btn-excel { padding: 7px 15px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 13px; margin-left: 5px; }
+        
         .status-buttons { display: flex; gap: 5px; margin-bottom: 10px; flex-wrap: wrap; }
         .btn-filter { padding: 6px 12px; font-size: 12px; border: 1px solid #ccc; background: #fff; border-radius: 20px; cursor: pointer; font-weight: bold; transition: all 0.2s; }
         .btn-filter:hover { background: #eee; }
@@ -26,12 +29,16 @@
         .table-wrapper { max-height: 400px; overflow-y: auto; border: 1px solid #ddd; margin-bottom: 15px; border-radius: 4px; }
         table { width: 100%; border-collapse: collapse; table-layout: fixed; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: center; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        th { position: sticky; top: 0; background: #eee; z-index: 10; font-size: 13px; }
-        .col-date { width: 120px; }
-        .col-decl { width: 180px; }
-        .col-hbl  { width: 180px; }
-        .col-trader { width: auto; }
-        .col-status { width: 100px; }
+        /* 정렬 헤더 스타일 */
+        th { position: sticky; top: 0; background: #eee; z-index: 10; font-size: 13px; cursor: pointer; user-select: none; }
+        th:hover { background: #e0e0e0; }
+        th::after { content: ' ↕'; font-size: 10px; color: #999; }
+
+        .col-date { width: 100px; }
+        .col-hbl  { width: 150px; }
+        .col-trader { width: 180px; }
+        .col-status { width: 90px; }
+        .col-reason { width: auto; }
         tr:hover td { background-color: #f1f7ff; cursor: pointer; }
         .selected td { background-color: #d1e7ff !important; font-weight: bold; }
         .detail-box { border: 2px solid #0056b3; border-radius: 8px; padding: 12px; background: #fff; margin-top: 10px; }
@@ -98,14 +105,15 @@
     <div class="search-container">
         <div class="filter-row">
             <span class="filter-label">기간</span>
-            <input type="date" id="start-date" class="date-input">
+            <input type="date" id="start-date" class="date-input" max="9999-12-31">
             <span>~</span>
-            <input type="date" id="end-date" class="date-input">
+            <input type="date" id="end-date" class="date-input" max="9999-12-31">
         </div>
         <div class="filter-row">
             <span class="filter-label">검색어</span>
-            <input type="text" id="search-input" class="search-input" placeholder="신고번호, HBL번호 입력 후 엔터">
+            <input type="text" id="search-input" class="search-input" placeholder="HBL번호, 수입자명 입력 후 엔터">
             <button onclick="handleSearch()" class="btn-search">검색</button>
+            <button onclick="downloadExcel()" class="btn-excel">엑셀 다운로드</button>
         </div>
     </div>
 
@@ -132,11 +140,11 @@
         <table id="data-table">
             <thead>
                 <tr>
-                    <th class="col-date">신고일자</th>
-                    <th class="col-decl">신고번호</th>
-                    <th class="col-hbl">HBL번호</th>
-                    <th class="col-trader">수입자명</th>
-                    <th class="col-status">수신상태</th>
+                    <th class="col-date" onclick="sortTable('issue_date')">신고일자</th>
+                    <th class="col-hbl" onclick="sortTable('hbl_no')">HBL번호</th>
+                    <th class="col-trader" onclick="sortTable('trader_name')">수입자명</th>
+                    <th class="col-status" onclick="sortTable('status')">수신상태</th>
+                    <th class="col-reason">미결/보완 사유</th>
                 </tr>
             </thead>
             <tbody id="list-body"></tbody>
@@ -173,12 +181,7 @@
 
     const { createClient } = supabase;
     const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { 
-            storage: window.localStorage, 
-            persistSession: true,
-            autoRefreshToken: true,
-            detectSessionInUrl: true 
-        }
+        auth: { storage: window.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
 
     let allData = [];
@@ -186,6 +189,7 @@
     let currentStatusFilter = 'ALL';
     let currentPage = 1;
     const itemsPerPage = 100;
+    let currentSort = { key: 'issue_date', asc: false };
 
     async function checkSession() {
         const { data: { session } } = await _supabase.auth.getSession();
@@ -224,21 +228,11 @@
         let from = 0;
         const step = 1000;
         let hasMore = true;
-
         while (hasMore) {
-            const { data, error } = await _supabase
-                .from('customs_clearance')
-                .select('*')
-                .range(from, from + step - 1)
-                .order('issue_date', { ascending: false });
-
-            if (error) {
-                console.error("Data Load Error:", error);
-                break;
-            }
+            const { data, error } = await _supabase.from('customs_clearance').select('*').range(from, from + step - 1).order('issue_date', { ascending: false });
+            if (error) break;
             results = results.concat(data);
-            if (data.length < step) hasMore = false;
-            else from += step;
+            if (data.length < step) hasMore = false; else from += step;
         }
         return results;
     }
@@ -246,34 +240,81 @@
     async function init() {
         allData = await loadAllData();
         showUnconfirmedAlerts();
-        
         const today = new Date();
         const lastWeek = new Date();
         lastWeek.setDate(today.getDate() - 7); 
-        
         document.getElementById('start-date').value = lastWeek.toISOString().split('T')[0];
         document.getElementById('end-date').value = today.toISOString().split('T')[0];
         handleSearch();
     }
 
+    // 정렬 함수
+    function sortTable(key) {
+        if (currentSort.key === key) {
+            currentSort.asc = !currentSort.asc;
+        } else {
+            currentSort.key = key;
+            currentSort.asc = true;
+        }
+        
+        filteredData.sort((a, b) => {
+            let valA = a[key] || "";
+            let valB = b[key] || "";
+            if (key === 'status') { valA = getDisplayStatus(valA); valB = getDisplayStatus(valB); }
+            if (valA < valB) return currentSort.asc ? -1 : 1;
+            if (valA > valB) return currentSort.asc ? 1 : -1;
+            return 0;
+        });
+        renderTable();
+    }
+
+    // 엑셀 다운로드 (CSV)
+    function downloadExcel() {
+        if (filteredData.length === 0) return alert("조회된 데이터가 없습니다.");
+        
+        let csvContent = "\uFEFF신고일자,HBL번호,수입자명,수신상태,미결/보완사유,MBL번호,중량,금액,메모\n";
+        
+        filteredData.forEach(row => {
+            const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            const reasonText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '-');
+            const statusText = getDisplayStatus(row.status);
+            
+            const line = [
+                row.issue_date || "",
+                row.hbl_no || "",
+                `"${(row.trader_name || "").replace(/"/g, '""')}"`,
+                statusText,
+                `"${reasonText.replace(/"/g, '""')}"`,
+                row.mbl_no || "",
+                row.weight || "",
+                row.amount || "",
+                `"${(row.memo || "").replace(/"/g, '""')}"`
+            ].join(",");
+            csvContent += line + "\n";
+        });
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", `통관조회_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
     function showUnconfirmedAlerts() {
         const unconfirmed = allData.filter(d => d.memo && d.memo.trim() !== "" && !d.checked);
         if (unconfirmed.length === 0) return;
-
         const modal = document.getElementById('alert-modal');
         const listContent = document.getElementById('modal-list-content');
         listContent.innerHTML = '';
-
         unconfirmed.forEach(item => {
             const div = document.createElement('div');
             div.className = 'modal-item';
-            div.innerHTML = `
-                <div>
-                    <span>${item.hbl_no}</span><br>
-                    <small style="color:#666">${item.memo}</small>
-                </div>
-                <button class="btn-confirm-mini" onclick="confirmInModal('${item.decl_no}', this)">확인</button>
-            `;
+            div.innerHTML = `<div><span>${item.hbl_no}</span><br><small style="color:#666">${item.memo}</small></div>
+                <button class="btn-confirm-mini" onclick="confirmInModal('${item.decl_no}', this)">확인</button>`;
             listContent.appendChild(div);
         });
         modal.style.display = 'flex';
@@ -290,10 +331,7 @@
         }
     }
 
-    function closeAlertModal() {
-        document.getElementById('alert-modal').style.display = 'none';
-    }
-
+    function closeAlertModal() { document.getElementById('alert-modal').style.display = 'none'; }
     function setStatusFilter(status, btn) {
         currentStatusFilter = status;
         document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
@@ -302,7 +340,6 @@
         handleSearch();
     }
 
-    // [변경] 신고전 -> 미신고 매핑 로직
     function getDisplayStatus(rawStatus) {
         const s = (rawStatus || '').trim();
         if (s === '미신고' || s === '진행중' || s === '신고전') return '미신고';
@@ -312,7 +349,6 @@
         return s || '미신고';
     }
 
-    // [변경] Badge 클래스 매칭
     function getBadgeClass(statusText) {
         if (statusText === '수리') return 'status-REPAIR';
         if (statusText === '대기') return 'status-WAIT';
@@ -326,26 +362,20 @@
         const startVal = document.getElementById('start-date').value.replace(/-/g, "");
         const endVal = document.getElementById('end-date').value.replace(/-/g, "");
         const searchInput = document.getElementById('search-input').value.trim().toLowerCase();
-        
         filteredData = allData.filter(d => {
             const dbDate = String(d.issue_date || "").trim();
-
             if (startVal && dbDate < startVal) return false;
             if (endVal && dbDate > endVal) return false;
-
             if (searchInput) {
                 const declNo = String(d.decl_no || "").toLowerCase();
                 const hblNo = String(d.hbl_no || "").toLowerCase();
                 const traderName = String(d.trader_name || "").toLowerCase();
                 if (!(declNo.includes(searchInput) || hblNo.includes(searchInput) || traderName.includes(searchInput))) return false;
             }
-
             if (currentStatusFilter !== 'ALL') {
                 const status = (d.status || '').trim();
                 const fileNo1 = (d.file_no1 || '').trim();
                 const displayStatus = getDisplayStatus(status);
-
-                // [변경] 미신고 필터링 조건
                 if (currentStatusFilter === 'UNREPORTED') return displayStatus === '미신고';
                 if (currentStatusFilter === 'REPAIR') return status === '수리';
                 if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
@@ -356,7 +386,6 @@
             }
             return true;
         });
-
         currentPage = 1;
         renderTable();
     }
@@ -367,7 +396,6 @@
         document.getElementById('current-page-num').innerText = currentPage;
         const tbody = document.getElementById('list-body');
         tbody.innerHTML = '';
-        
         const startIndex = (currentPage - 1) * itemsPerPage;
         const pageData = filteredData.slice(startIndex, startIndex + itemsPerPage);
 
@@ -377,8 +405,14 @@
             const badgeClass = getBadgeClass(statusText);
             const dStr = String(row.issue_date || "").replace(/[^0-9]/g, "");
             const formattedDate = dStr.length >= 8 ? `${dStr.substring(0,4)}-${dStr.substring(4,6)}-${dStr.substring(6,8)}` : dStr;
+            const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            const reasonText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '-');
 
-            tr.innerHTML = `<td>${formattedDate}</td><td>${row.decl_no}</td><td>${row.hbl_no}</td><td style="text-align:left;">${row.trader_name}</td><td><span class="status-badge ${badgeClass}">${statusText}</span></td>`;
+            tr.innerHTML = `<td>${formattedDate}</td>
+                            <td>${row.hbl_no}</td>
+                            <td style="text-align:left;">${row.trader_name}</td>
+                            <td><span class="status-badge ${badgeClass}">${statusText}</span></td>
+                            <td style="text-align:left; color:#e03131;">${reasonText}</td>`;
             tr.onclick = () => {
                 document.querySelectorAll('tr').forEach(r => r.classList.remove('selected'));
                 tr.classList.add('selected');
@@ -393,12 +427,10 @@
         const paginationContainer = document.getElementById('pagination');
         paginationContainer.innerHTML = '';
         const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
-        
         const prevBtn = document.createElement('button');
         prevBtn.innerText = '이전'; prevBtn.className = 'page-btn'; prevBtn.disabled = currentPage === 1;
         prevBtn.onclick = () => { currentPage--; renderTable(); };
         paginationContainer.appendChild(prevBtn);
-
         let startPage = Math.max(1, currentPage - 2);
         let endPage = Math.min(totalPages, startPage + 4);
         if (endPage - startPage < 4) startPage = Math.max(1, endPage - 4);
@@ -408,7 +440,6 @@
             btn.onclick = () => { currentPage = i; renderTable(); };
             paginationContainer.appendChild(btn);
         }
-        
         const nextBtn = document.createElement('button');
         nextBtn.innerText = '다음'; nextBtn.className = 'page-btn'; nextBtn.disabled = currentPage === totalPages;
         nextBtn.onclick = () => { currentPage++; renderTable(); };
@@ -422,61 +453,32 @@
         document.getElementById('det_status').innerText = getDisplayStatus(row.status);
         document.getElementById('det_weight').innerText = row.weight ? row.weight : '-';
         document.getElementById('det_amount').innerText = row.amount ? row.amount : '-';
-        
         const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
         document.getElementById('det_reason').innerText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '특이사항 없음');
-        
         const memoInput = document.getElementById('memo-input');
         const saveBtn = document.getElementById('btn-save-memo');
         const confirmBtn = document.getElementById('btn-confirm-memo');
-        
         memoInput.disabled = false;
         memoInput.value = row.memo || '';
         saveBtn.style.display = 'inline-block';
-
-        memoInput.onkeydown = (e) => {
-            if (e.key === 'Enter') {
-                saveMemo(row.decl_no, memoInput.value);
-            }
-        };
-
+        memoInput.onkeydown = (e) => { if (e.key === 'Enter') saveMemo(row.decl_no, memoInput.value); };
         saveBtn.onclick = () => saveMemo(row.decl_no, memoInput.value);
-
         if (row.memo && row.memo.trim() !== "" && !row.checked) {
             confirmBtn.style.display = 'inline-block';
             confirmBtn.onclick = () => confirmInPage(row.decl_no);
-        } else {
-            confirmBtn.style.display = 'none';
-        }
+        } else { confirmBtn.style.display = 'none'; }
     }
 
     async function saveMemo(declNo, memoValue) {
         const statusSpan = document.getElementById('save-status');
         const confirmBtn = document.getElementById('btn-confirm-memo');
-
-        const { error } = await _supabase.from('customs_clearance').update({ 
-            memo: memoValue, 
-            checked: false 
-        }).eq('decl_no', declNo);
-
+        const { error } = await _supabase.from('customs_clearance').update({ memo: memoValue, checked: false }).eq('decl_no', declNo);
         if (!error) {
-            statusSpan.style.display = 'inline';
-            setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
-            
+            statusSpan.style.display = 'inline'; setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
             const target = allData.find(d => d.decl_no === declNo);
-            if(target) { 
-                target.memo = memoValue; 
-                target.checked = false; 
-            }
-            
-            if (!memoValue || memoValue.trim() === "") {
-                confirmBtn.style.display = 'none';
-            } else {
-                confirmBtn.style.display = 'inline-block';
-                confirmBtn.onclick = () => confirmInPage(declNo);
-            }
-        } else {
-            alert("저장 실패: " + error.message);
+            if(target) { target.memo = memoValue; target.checked = false; }
+            if (!memoValue || memoValue.trim() === "") { confirmBtn.style.display = 'none'; } 
+            else { confirmBtn.style.display = 'inline-block'; confirmBtn.onclick = () => confirmInPage(declNo); }
         }
     }
 
@@ -488,9 +490,7 @@
             document.getElementById('btn-confirm-memo').style.display = 'none';
         }
     }
-
     document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
-
     checkSession();
 </script>
 </body>
