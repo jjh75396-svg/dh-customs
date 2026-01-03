@@ -5,7 +5,6 @@
     <title>수입통관 통합 조회 시스템</title>
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
-        /* [기존 스타일 유지] */
         body { font-family: 'Malgun Gothic', sans-serif; margin: 10px 20px; background-color: #f5f7fa; color: #333; }
         .container { max-width: 1200px; margin: 0 auto; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h2 { color: #0056b3; border-bottom: 2px solid #0056b3; padding-bottom: 8px; margin: 0 0 10px 0; font-size: 20px; }
@@ -92,7 +91,7 @@
 
 <div id="main-app" class="container">
     <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h2>📦 수입통관 통합 조회</h2>
+        <h2 style="border:none; margin:0;">📦 수입통관 통합 조회</h2>
         <button onclick="handleLogout()" style="padding:5px 10px; cursor:pointer; font-size:12px;">로그아웃</button>
     </div>
     
@@ -112,7 +111,7 @@
 
     <div class="status-buttons">
         <button class="btn-filter active" onclick="setStatusFilter('ALL', this)">전체</button>
-        <button class="btn-filter" onclick="setStatusFilter('BEFORE', this)">신고전</button>
+        <button class="btn-filter" onclick="setStatusFilter('UNREPORTED', this)">미신고</button>
         <button class="btn-filter" onclick="setStatusFilter('REPAIR', this)">수리</button>
         <button class="btn-filter" onclick="setStatusFilter('WAIT', this)">수리전</button>
         <button class="btn-filter" onclick="setStatusFilter('ERROR', this)">오류</button>
@@ -303,41 +302,42 @@
         handleSearch();
     }
 
+    // [변경] 신고전 -> 미신고 매핑 로직
     function getDisplayStatus(rawStatus) {
         const s = (rawStatus || '').trim();
-        if (s === '진행중' || s === '신고전') return '신고전';
+        if (s === '미신고' || s === '진행중' || s === '신고전') return '미신고';
         if (s.match(/선별|제출|전제|신고접수|대기/)) return '대기';
         if (s.match(/서보|보완|서변|미결|보류/)) return '미결';
         if (s === '수리') return '수리';
-        return s || '신고전';
+        return s || '미신고';
     }
 
+    // [변경] Badge 클래스 매칭
     function getBadgeClass(statusText) {
         if (statusText === '수리') return 'status-REPAIR';
         if (statusText === '대기') return 'status-WAIT';
         if (statusText === '미결') return 'status-HOLD';
-        if (statusText === '신고전') return 'status-BEFORE';
+        if (statusText === '미신고') return 'status-BEFORE';
         if (statusText.includes('오류')) return 'status-ERROR';
         return 'status-DEFAULT';
     }
 
     function handleSearch() {
-        const startDateRaw = document.getElementById('start-date').value;
-        const endDateRaw = document.getElementById('end-date').value;
-        const startVal = startDateRaw ? startDateRaw.replace(/-/g, "") : "";
-        const endVal = endDateRaw ? endDateRaw.replace(/-/g, "") : "";
+        const startVal = document.getElementById('start-date').value.replace(/-/g, "");
+        const endVal = document.getElementById('end-date').value.replace(/-/g, "");
         const searchInput = document.getElementById('search-input').value.trim().toLowerCase();
         
         filteredData = allData.filter(d => {
-            const dbDate = String(d.issue_date || "").replace(/[^0-9]/g, "").substring(0, 8);
+            const dbDate = String(d.issue_date || "").trim();
+
             if (startVal && dbDate < startVal) return false;
             if (endVal && dbDate > endVal) return false;
 
             if (searchInput) {
-                const match = (d.decl_no && d.decl_no.toLowerCase().includes(searchInput)) || 
-                              (d.hbl_no && d.hbl_no.toLowerCase().includes(searchInput)) || 
-                              (d.trader_name && d.trader_name.toLowerCase().includes(searchInput));
-                if (!match) return false;
+                const declNo = String(d.decl_no || "").toLowerCase();
+                const hblNo = String(d.hbl_no || "").toLowerCase();
+                const traderName = String(d.trader_name || "").toLowerCase();
+                if (!(declNo.includes(searchInput) || hblNo.includes(searchInput) || traderName.includes(searchInput))) return false;
             }
 
             if (currentStatusFilter !== 'ALL') {
@@ -345,7 +345,8 @@
                 const fileNo1 = (d.file_no1 || '').trim();
                 const displayStatus = getDisplayStatus(status);
 
-                if (currentStatusFilter === 'BEFORE') return displayStatus === '신고전';
+                // [변경] 미신고 필터링 조건
+                if (currentStatusFilter === 'UNREPORTED') return displayStatus === '미신고';
                 if (currentStatusFilter === 'REPAIR') return status === '수리';
                 if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
                 if (currentStatusFilter === 'ERROR') return status.includes('오류');
@@ -355,6 +356,7 @@
             }
             return true;
         });
+
         currentPage = 1;
         renderTable();
     }
@@ -448,7 +450,6 @@
         }
     }
 
-    // 수정된 saveMemo 함수: 빈 값 처리 및 상태 동기화 로직 포함
     async function saveMemo(declNo, memoValue) {
         const statusSpan = document.getElementById('save-status');
         const confirmBtn = document.getElementById('btn-confirm-memo');
@@ -468,7 +469,6 @@
                 target.checked = false; 
             }
             
-            // 메모가 삭제되었거나 비어있으면 '관리자 확인' 버튼 숨기기
             if (!memoValue || memoValue.trim() === "") {
                 confirmBtn.style.display = 'none';
             } else {
