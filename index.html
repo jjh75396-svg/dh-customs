@@ -144,7 +144,7 @@
                     <th class="col-hbl" onclick="sortTable('hbl_no')">HBL번호</th>
                     <th class="col-trader" onclick="sortTable('trader_name')">수입자명</th>
                     <th class="col-status" onclick="sortTable('status')">수신상태</th>
-                    <th class="col-reason">미결/보완 사유</th>
+                    <th class="col-reason" onclick="sortTable('reason_display')">미결/보완 사유</th>
                 </tr>
             </thead>
             <tbody id="list-body"></tbody>
@@ -176,6 +176,13 @@
 </div>
 
 <script>
+    // [설정] 아이디별 agent_nm 할당 (다른 기능은 일절 건드리지 않음)
+    const authMap = {
+        "admin@admin.com": "ALL",
+        "ht@ht.com": "포에스홀딩스",
+        "sinter@sinter.com": "에스인터"
+    };
+
     const SUPABASE_URL = "https://rxjjtwtwqisyzuwfbsfm.supabase.co".trim();
     const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4amp0d3R3cWlzeXp1d2Zic2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzQ1MzEsImV4cCI6MjA4MjMxMDUzMX0.XZWjh_RklpRvVPPbgyciKsqJQdJMvD4AewmJBl_zot0".replace(/\s/g, "");
 
@@ -224,12 +231,29 @@
     }
 
     async function loadAllData() {
+        const { data: { user } } = await _supabase.auth.getUser();
+        const email = user?.email;
+        const allowedAgent = authMap[email];
+
         let results = [];
         let from = 0;
         const step = 1000;
         let hasMore = true;
+
         while (hasMore) {
-            const { data, error } = await _supabase.from('customs_clearance').select('*').range(from, from + step - 1).order('issue_date', { ascending: false });
+            let query = _supabase.from('customs_clearance').select('*').range(from, from + step - 1).order('issue_date', { ascending: false });
+            
+            if (allowedAgent && allowedAgent !== "ALL") {
+                if (Array.isArray(allowedAgent)) {
+                    query = query.in('agent_nm', allowedAgent);
+                } else {
+                    query = query.eq('agent_nm', allowedAgent);
+                }
+            } else if (!allowedAgent && email !== 'admin@test.com') {
+                return [];
+            }
+
+            const { data, error } = await query;
             if (error) break;
             results = results.concat(data);
             if (data.length < step) hasMore = false; else from += step;
@@ -248,27 +272,43 @@
         handleSearch();
     }
 
-    // 정렬 함수
-    function sortTable(key) {
-        if (currentSort.key === key) {
-            currentSort.asc = !currentSort.asc;
-        } else {
-            currentSort.key = key;
-            currentSort.asc = true;
-        }
-        
-        filteredData.sort((a, b) => {
-            let valA = a[key] || "";
-            let valB = b[key] || "";
-            if (key === 'status') { valA = getDisplayStatus(valA); valB = getDisplayStatus(valB); }
-            if (valA < valB) return currentSort.asc ? -1 : 1;
-            if (valA > valB) return currentSort.asc ? 1 : -1;
-            return 0;
-        });
-        renderTable();
+function sortTable(key) {
+    if (currentSort.key === key) {
+        currentSort.asc = !currentSort.asc;
+    } else {
+        currentSort.key = key;
+        currentSort.asc = true;
     }
+    
+    filteredData.sort((a, b) => {
+        let valA, valB;
 
-    // 엑셀 다운로드 (CSV)
+        if (key === 'status') {
+            valA = getDisplayStatus(a.status);
+            valB = getDisplayStatus(b.status);
+        } 
+        else if (key === 'reason_display') {
+            const isSpecA = (a.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            const isSpecB = (b.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            valA = (isSpecA && a.file_no2) ? String(a.file_no2) : String(a.reason || '-');
+            valB = (isSpecB && b.file_no2) ? String(b.file_no2) : String(b.reason || '-');
+        }
+        else {
+            valA = String(a[key] || "");
+            valB = String(b[key] || "");
+        }
+
+        valA = valA.toLowerCase();
+        valB = valB.toLowerCase();
+
+        if (valA < valB) return currentSort.asc ? -1 : 1;
+        if (valA > valB) return currentSort.asc ? 1 : -1;
+        return 0;
+    });
+    
+    renderTable();
+}
+
     function downloadExcel() {
         if (filteredData.length === 0) return alert("조회된 데이터가 없습니다.");
         
@@ -362,16 +402,27 @@
         const startVal = document.getElementById('start-date').value.replace(/-/g, "");
         const endVal = document.getElementById('end-date').value.replace(/-/g, "");
         const searchInput = document.getElementById('search-input').value.trim().toLowerCase();
+        
         filteredData = allData.filter(d => {
             const dbDate = String(d.issue_date || "").trim();
             if (startVal && dbDate < startVal) return false;
             if (endVal && dbDate > endVal) return false;
+            
             if (searchInput) {
                 const declNo = String(d.decl_no || "").toLowerCase();
                 const hblNo = String(d.hbl_no || "").toLowerCase();
                 const traderName = String(d.trader_name || "").toLowerCase();
-                if (!(declNo.includes(searchInput) || hblNo.includes(searchInput) || traderName.includes(searchInput))) return false;
+                
+                // 화면에 표시되는 미결/보완 사유 텍스트 추출 및 검색 조건 추가
+                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+                const reasonText = String((isSpecialStatus && d.file_no2) ? d.file_no2 : (d.reason || '-')).toLowerCase();
+                
+                if (!(declNo.includes(searchInput) || 
+                      hblNo.includes(searchInput) || 
+                      traderName.includes(searchInput) || 
+                      reasonText.includes(searchInput))) return false;
             }
+            
             if (currentStatusFilter !== 'ALL') {
                 const status = (d.status || '').trim();
                 const fileNo1 = (d.file_no1 || '').trim();
