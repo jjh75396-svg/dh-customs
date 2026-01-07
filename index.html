@@ -97,7 +97,7 @@
         </div>
         <div class="filter-row">
             <span class="filter-label">검색어</span>
-            <input type="text" id="search-input" class="search-input" placeholder="신고번호, HBL, 수입자명 (여러 번호는 콤마나 공백으로 구분)">
+            <input type="text" id="search-input" class="search-input" placeholder="신고번호, HBL, 수입자명, 미결 보완 사유 (여러 번호는 콤마나 공백으로 구분)">
             <button onclick="handleSearch()" class="btn-search">검색</button>
             <button onclick="downloadExcel()" class="btn-excel">엑셀 다운로드</button>
             <input type="file" id="excel-upload" style="display:none;" accept=".xlsx, .xls, .csv" onchange="handleExcelUpload(event)">
@@ -222,39 +222,49 @@
         }
     }
 
-    async function loadAllData() {
+    // [최적화] 서버에서 직접 날짜와 권한을 필터링하여 가져오는 함수
+    async function loadDataFromServer(startDate, endDate) {
         const { data: { user } } = await _supabase.auth.getUser();
         const email = user?.email;
         const allowedAgent = authMap[email];
-        let results = [];
-        let from = 0;
-        const step = 1000;
-        let hasMore = true;
-        while (hasMore) {
-            let query = _supabase.from('customs_clearance').select('*').or('is_deleted.is.null,is_deleted.eq.false').range(from, from + step - 1).order('issue_date', { ascending: false });
-            if (allowedAgent && allowedAgent !== "ALL") {
-                if (Array.isArray(allowedAgent)) { query = query.in('agent_nm', allowedAgent); } else { query = query.eq('agent_nm', allowedAgent); }
-            } else if (!allowedAgent && email !== 'admin@admin.com') { return []; }
-            const { data, error } = await query;
-            if (error) break;
-            results = results.concat(data);
-            if (data.length < step) hasMore = false; else from += step;
+        
+        const sVal = startDate.replace(/-/g, "");
+        const eVal = endDate.replace(/-/g, "");
+
+        let query = _supabase
+            .from('customs_clearance')
+            .select('*')
+            .or('is_deleted.is.null,is_deleted.eq.false')
+            .gte('issue_date', sVal)
+            .lte('issue_date', eVal);
+
+        if (allowedAgent && allowedAgent !== "ALL") {
+            if (Array.isArray(allowedAgent)) { query = query.in('agent_nm', allowedAgent); } 
+            else { query = query.eq('agent_nm', allowedAgent); }
+        } else if (!allowedAgent && email !== 'admin@admin.com') { return []; }
+
+        const { data, error } = await query.order('issue_date', { ascending: false });
+        if (error) {
+            console.error("데이터 로드 오류:", error);
+            return [];
         }
-        return results;
+        return data || [];
     }
 
     async function init() {
-        allData = await loadAllData();
-        showUnconfirmedAlerts();
         const today = new Date();
-        const lastMonth = new Date();
-        lastMonth.setDate(today.getDate() - 7); 
-        document.getElementById('start-date').value = lastMonth.toISOString().split('T')[0];
+        const lastWeek = new Date();
+        lastWeek.setDate(today.getDate() - 7); 
+        document.getElementById('start-date').value = lastWeek.toISOString().split('T')[0];
         document.getElementById('end-date').value = today.toISOString().split('T')[0];
-        handleSearch();
+        
+        // 초기 로딩 시 검색 실행
+        await handleSearch();
+        
+        // 미확인 메모 팝업 체크 (초기 검색된 데이터 기반)
+        showUnconfirmedAlerts();
     }
 
-    // 바로가기 기능: 검색창에 HBL 입력 후 검색 실행 및 상세 표시
     window.goToTarget = function(hblNo, declNo) {
         const searchInput = document.getElementById('search-input');
         searchInput.value = hblNo;
@@ -274,62 +284,14 @@
         if (unconfirmed.length === 0) return;
 
         const win = window.open("", "MemoPopup", "width=600,height=600,scrollbars=yes");
-        
-        let html = `
-            <html>
-            <head>
-                <title>미확인 메모 알림</title>
-                <style>
-                    body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f8f9fa; }
-                    .title { font-size: 18px; font-weight: bold; color: #d63301; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
-                    .item { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-                    .info { font-size: 13px; color: #0056b3; font-weight: bold; }
-                    .reason { font-size: 12px; color: #666; margin-top: 4px; }
-                    .memo { font-size: 13px; color: #333; margin-top: 8px; padding-top: 8px; border-top: 1px dotted #eee; }
-                    .btn-group { display: flex; flex-direction: column; gap: 5px; margin-left: 15px; }
-                    .btn-check { padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }
-                    .btn-go { padding: 6px 12px; background: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }
-                    .btn-close { width: 100%; padding: 10px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }
-                </style>
-            </head>
-            <body>
-                <div class="title">📢 미확인 메모 알림</div>
-                <div id="popup-list">`;
-
+        let html = `<html><head><title>미확인 메모 알림</title><style>body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f8f9fa; }.title { font-size: 18px; font-weight: bold; color: #d63301; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }.item { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }.info { font-size: 13px; color: #0056b3; font-weight: bold; }.reason { font-size: 12px; color: #666; margin-top: 4px; }.memo { font-size: 13px; color: #333; margin-top: 8px; padding-top: 8px; border-top: 1px dotted #eee; }.btn-group { display: flex; flex-direction: column; gap: 5px; margin-left: 15px; }.btn-check { padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-go { padding: 6px 12px; background: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-close { width: 100%; padding: 10px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }</style></head><body><div class="title">📢 미확인 메모 알림</div><div id="popup-list">`;
         unconfirmed.forEach(item => {
             const isSpecialStatus = (item.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
             const reasonText = (isSpecialStatus && item.file_no2) ? item.file_no2 : (item.reason || '-');
-
-            html += `
-                <div class="item" id="row-${item.decl_no}">
-                    <div style="flex:1;">
-                        <div class="info">[HBL: ${item.hbl_no} / 대행사: ${item.agent_nm || '-'}]</div>
-                        <div class="reason">⚠️ 사유: ${reasonText}</div>
-                        <div class="memo">💬 ${item.memo}</div>
-                    </div>
-                    <div class="btn-group">
-                        <button class="btn-check" onclick="opener.confirmFromPopup('${item.decl_no}')">확인</button>
-                        <button class="btn-go" onclick="opener.goToTarget('${item.hbl_no}', '${item.decl_no}')">바로가기</button>
-                    </div>
-                </div>`;
+            html += `<div class="item" id="row-${item.decl_no}"><div style="flex:1;"><div class="info">[HBL: ${item.hbl_no} / 대행사: ${item.agent_nm || '-'}]</div><div class="reason">⚠️ 사유: ${reasonText}</div><div class="memo">💬 ${item.memo}</div></div><div class="btn-group"><button class="btn-check" onclick="opener.confirmFromPopup('${item.decl_no}')">확인</button><button class="btn-go" onclick="opener.goToTarget('${item.hbl_no}', '${item.decl_no}')">바로가기</button></div></div>`;
         });
-
-        html += `
-                </div>
-                <button class="btn-close" onclick="window.close()">닫기</button>
-                <script>
-                    window.removeRow = function(declNo) {
-                        const el = document.getElementById('row-' + declNo);
-                        if(el) el.remove();
-                        if(document.getElementById('popup-list').children.length === 0) window.close();
-                    };
-                <\/script>
-            </body>
-            </html>`;
-
-        win.document.write(html);
-        win.document.close();
-        window.memoPopup = win;
+        html += `</div><button class="btn-close" onclick="window.close()">닫기</button><script>window.removeRow = function(declNo) { const el = document.getElementById('row-' + declNo); if(el) el.remove(); if(document.getElementById('popup-list').children.length === 0) window.close(); };<\/script></body></html>`;
+        win.document.write(html); win.document.close(); window.memoPopup = win;
     }
 
     window.confirmFromPopup = async function(declNo) {
@@ -343,16 +305,22 @@
         }
     };
 
-    function handleSearch() {
-        const startVal = document.getElementById('start-date').value.replace(/-/g, "");
-        const endVal = document.getElementById('end-date').value.replace(/-/g, "");
+    // [최적화] 버튼 클릭 시 서버에서 해당 기간 데이터만 새로 로드함
+    async function handleSearch() {
+        const sInput = document.getElementById('start-date').value;
+        const eInput = document.getElementById('end-date').value;
         const rawInput = document.getElementById('search-input').value.trim().toLowerCase();
         const searchTerms = rawInput ? rawInput.split(/[\s,\n]+/).filter(t => t.length > 0) : [];
 
+        // 로딩 안내 표시 (데이터가 많을 경우 대비)
+        const tbody = document.getElementById('list-body');
+        tbody.innerHTML = '<tr><td colspan="5">데이터를 불러오는 중...</td></tr>';
+
+        // 1. 서버에서 해당 기간의 데이터만 가져옴 (전체 다운로드 방지)
+        allData = await loadDataFromServer(sInput, eInput);
+
+        // 2. 가져온 데이터 내에서 검색어 및 상태 필터 적용
         filteredData = allData.filter(d => {
-            const dbDate = String(d.issue_date || "").trim();
-            if (startVal && dbDate < startVal) return false;
-            if (endVal && dbDate > endVal) return false;
             if (searchTerms.length > 0) {
                 const declNo = String(d.decl_no || "").toLowerCase();
                 const hblNo = String(d.hbl_no || "").toLowerCase();
@@ -377,7 +345,9 @@
             }
             return true;
         });
-        currentPage = 1; renderTable();
+        
+        currentPage = 1; 
+        renderTable();
     }
 
     async function handleExcelUpload(event) {
@@ -455,7 +425,43 @@
         currentStatusFilter = status;
         document.querySelectorAll('.btn-filter').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        currentPage = 1; handleSearch();
+        currentPage = 1; 
+        // 상태 필터 시에도 현재 설정된 날짜 기반으로 필터링 유지 (re-render)
+        renderTableAfterFilter();
+    }
+
+    // 상태 필터는 이미 가져온 allData 내에서 처리하므로 서버 호출 없이 리렌더링만 수행
+    function renderTableAfterFilter() {
+        const rawInput = document.getElementById('search-input').value.trim().toLowerCase();
+        const searchTerms = rawInput ? rawInput.split(/[\s,\n]+/).filter(t => t.length > 0) : [];
+        
+        filteredData = allData.filter(d => {
+            if (searchTerms.length > 0) {
+                const declNo = String(d.decl_no || "").toLowerCase();
+                const hblNo = String(d.hbl_no || "").toLowerCase();
+                const traderName = String(d.trader_name || "").toLowerCase();
+                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+                const reasonText = String((isSpecialStatus && d.file_no2) ? d.file_no2 : (d.reason || '-')).toLowerCase();
+                const match = searchTerms.some(term => declNo.includes(term) || hblNo.includes(term) || traderName.includes(term) || reasonText.includes(term));
+                if (!match) return false;
+            }
+            if (currentStatusFilter !== 'ALL') {
+                const status = (d.status || '').trim();
+                const fileNo1 = (d.file_no1 || '').trim();
+                const displayStatus = getDisplayStatus(status);
+                const isErrorOrHold = status.includes('오류') || status.match(/미결|보완|보류|서변|서보/);
+                if (currentStatusFilter === 'UNREPORTED') return displayStatus === '미신고';
+                if (currentStatusFilter === 'REPAIR') return status === '수리';
+                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
+                if (currentStatusFilter === 'ERROR') return status.includes('오류');
+                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보/);
+                if (currentStatusFilter === 'ANIMAL') return fileNo1.includes('동검') && !isErrorOrHold;
+                if (currentStatusFilter === 'PLANT') return fileNo1.includes('식검') && !isErrorOrHold;
+            }
+            return true;
+        });
+        currentPage = 1;
+        renderTable();
     }
 
     function getDisplayStatus(rawStatus) {
@@ -481,6 +487,11 @@
         document.getElementById('count').innerText = totalItems.toLocaleString();
         document.getElementById('current-page-num').innerText = currentPage;
         const tbody = document.getElementById('list-body'); tbody.innerHTML = '';
+        if (totalItems === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">데이터가 없습니다.</td></tr>';
+            renderPagination(0);
+            return;
+        }
         const startIndex = (currentPage - 1) * itemsPerPage;
         const pageData = filteredData.slice(startIndex, startIndex + itemsPerPage);
         pageData.forEach(row => {
