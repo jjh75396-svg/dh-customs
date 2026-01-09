@@ -600,6 +600,32 @@
         }
     }
 
+// --- 여기에 자동 새로고침 코드를 추가하세요 ---
+    setInterval(async () => {
+        const { data: { session } } = await _supabase.auth.getSession();
+        if (session) {
+            console.log("데이터 자동 동기화 중 (60초 주기)...");
+            
+            // 1. 현재 날짜 조건으로 서버에서 데이터 재로드
+            const sInput = document.getElementById('start-date').value;
+            const eInput = document.getElementById('end-date').value;
+            const newData = await loadDataFromServer(sInput, eInput);
+            
+            if (newData && newData.length > 0) {
+                allData = newData; // 전체 데이터 교체
+                renderTableAfterFilter(); // 현재 보고 있는 필터 유지하며 테이블 갱신
+                
+                // 2. 새로운 미확인 메모가 있다면 알림 팝업 갱신
+                const myEmail = session.user.email;
+                const unconfirmed = allData.filter(d => d.memo && d.memo.trim() !== "" && !d.checked && d.last_writer !== myEmail);
+                if (unconfirmed.length > 0) {
+                    showUnconfirmedAlerts(); // 기존 팝업이 있으면 내용만 교체됨
+                }
+            }
+        }
+    }, 600000); // 60초마다 실행 (원하는 초로 변경 가능)
+
+
     document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
     checkSession();
 </script>
