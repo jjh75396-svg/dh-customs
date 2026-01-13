@@ -221,52 +221,60 @@
         }
     }
 
-    async function loadDataFromServer(startDate, endDate) {
-        const { data: { user } } = await _supabase.auth.getUser();
-        if(!user) return [];
-        
-        const email = user.email;
-        const allowedAgent = authMap[email];
-        const sVal = startDate.replace(/-/g, "");
-        const eVal = endDate.replace(/-/g, "");
+async function loadDataFromServer(startDate, endDate) {
+    const { data: { user } } = await _supabase.auth.getUser();
+    if (!user) return [];
+    
+    const email = user.email;
+    const allowedAgent = authMap[email];
+    const sVal = startDate.replace(/-/g, "");
+    const eVal = endDate.replace(/-/g, "");
 
-        let allFetchedData = [];
-        let from = 0;
-        const step = 1000;
-        let hasMore = true;
+    // [수정] 함수 호출 시마다 바구니를 빈 상태로 시작합니다.
+    let allFetchedData = []; 
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
 
-        while (hasMore) {
-            let query = _supabase
-                .from('customs_clearance')
-                .select('*')
-                .or('is_deleted.is.null,is_deleted.eq.false')
-                .gte('issue_date', sVal)
-                .lte('issue_date', eVal)
-                .order('issue_date', { ascending: false })
-                .range(from, from + step - 1);
+    while (hasMore) {
+        let query = _supabase
+            .from('customs_clearance')
+            .select('*')
+            .or('is_deleted.is.null,is_deleted.eq.false')
+            .gte('issue_date', sVal)
+            .lte('issue_date', eVal)
+            .range(from, from + step - 1);
 
-            if (allowedAgent && allowedAgent !== "ALL") {
-                if (Array.isArray(allowedAgent)) { query = query.in('agent_nm', allowedAgent); } 
-                else { query = query.eq('agent_nm', allowedAgent); }
-            } else if (!allowedAgent && email !== 'admin@admin.com') { break; }
-
-            const { data, error } = await query;
-            if (error) { console.error("데이터 로드 오류:", error); break; }
-
-            if (data && data.length > 0) {
-                allFetchedData = allFetchedData.concat(data);
-                if (data.length < step) {
-                    hasMore = false;
-                } else {
-                    from += step;
-                }
-            } else {
-                hasMore = false;
-            }
-            if (from > 30000) break; 
+        if (allowedAgent && allowedAgent !== "ALL") {
+            query = query.eq('agent_nm', allowedAgent);
         }
-        return allFetchedData;
+
+        const { data, error } = await query;
+        if (error) {
+            console.error("데이터 로드 오류:", error);
+            break;
+        }
+
+        if (data && data.length > 0) {
+            // 이번 요청에서 받은 데이터만 추가
+            allFetchedData = allFetchedData.concat(data);
+            if (data.length < step) hasMore = false;
+            else from += step;
+        } else {
+            hasMore = false;
+        }
     }
+
+    // [추가 보안] decl_no를 기준으로 최종 중복 제거 (브라우저 메모리 보호)
+    const uniqueMap = new Map();
+    allFetchedData.forEach(item => {
+        if (!uniqueMap.has(item.decl_no)) {
+            uniqueMap.set(item.decl_no, item);
+        }
+    });
+
+    return Array.from(uniqueMap.values());
+}
 
     async function init() {
         const today = new Date();
@@ -321,8 +329,12 @@
         const rawInput = document.getElementById('search-input').value.trim().toLowerCase();
         const searchTerms = rawInput ? rawInput.split(/[\s,\n]+/).filter(t => t.length > 0) : [];
         const tbody = document.getElementById('list-body');
-        tbody.innerHTML = '<tr><td colspan="5">데이터를 불러오는 중...</td></tr>';
-        allData = await loadDataFromServer(sInput, eInput);
+        tbody.innerHTML = '<tr><td colspan="5">데이터를 불러오는 중...</td></tr>';    
+        allData = []; // 1. 데이터를 새로 받기 전에 기존 바구니를 싹 비웁니다.
+        allData = await loadDataFromServer(sInput, eInput); // 2. 그 다음 서버 데이터를 새로 채웁니다.
+
+    renderTableAfterFilter();
+
         
         filteredData = allData.filter(d => {
             if (searchTerms.length > 0) {
