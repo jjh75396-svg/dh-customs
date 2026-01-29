@@ -304,7 +304,7 @@ async function loadDataFromServer(startDate, endDate) {
         const win = window.open("", "MemoPopup", "width=600,height=600,scrollbars=yes");
         let html = `<html><head><title>미확인 메모 알림</title><style>body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f8f9fa; }.title { font-size: 18px; font-weight: bold; color: #d63301; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }.item { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }.info { font-size: 13px; color: #0056b3; font-weight: bold; }.reason { font-size: 12px; color: #666; margin-top: 4px; }.memo { font-size: 13px; color: #333; margin-top: 8px; padding-top: 8px; border-top: 1px dotted #eee; }.btn-group { display: flex; flex-direction: column; gap: 5px; margin-left: 15px; }.btn-check { padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-go { padding: 6px 12px; background: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-close { width: 100%; padding: 10px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }</style></head><body><div class="title">📢 미확인 메모 알림</div><div id="popup-list">`;
         unconfirmed.forEach(item => {
-            const isSpecialStatus = (item.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            const isSpecialStatus = (item.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
             const reasonText = (isSpecialStatus && item.file_no2) ? item.file_no2 : (item.reason || '-');
             html += `<div class="item" id="row-${item.decl_no}"><div style="flex:1;"><div class="info">[HBL: ${item.hbl_no} / 대행사: ${item.agent_nm || '-'}]</div><div class="reason">⚠️ 사유: ${reasonText}</div><div class="memo">💬 ${item.memo}</div></div><div class="btn-group"><button class="btn-check" onclick="opener.confirmFromPopup('${item.decl_no}')">확인</button><button class="btn-go" onclick="opener.goToTarget('${item.hbl_no}', '${item.decl_no}')">바로가기</button></div></div>`;
         });
@@ -341,7 +341,7 @@ async function loadDataFromServer(startDate, endDate) {
                 const declNo = String(d.decl_no || "").toLowerCase();
                 const hblNo = String(d.hbl_no || "").toLowerCase();
                 const traderName = String(d.trader_name || "").toLowerCase();
-                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
                 const reasonText = String((isSpecialStatus && d.file_no2) ? d.file_no2 : (d.reason || '-')).toLowerCase();
                 const match = searchTerms.some(term => declNo.includes(term) || hblNo.includes(term) || traderName.includes(term) || reasonText.includes(term));
                 if (!match) return false;
@@ -363,9 +363,9 @@ async function loadDataFromServer(startDate, endDate) {
 
                 if (currentStatusFilter === 'UNREPORTED') return displayStatus === '미신고';
                 if (currentStatusFilter === 'REPAIR') return status === '수리';
-                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
+                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제|결재/);
                 if (currentStatusFilter === 'ERROR') return status.includes('오류');
-                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보/);
+                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보|담변/);
             }
             return true;
         });
@@ -415,8 +415,8 @@ async function loadDataFromServer(startDate, endDate) {
             let valA, valB;
             if (key === 'status') { valA = getDisplayStatus(a.status); valB = getDisplayStatus(b.status); }
             else if (key === 'reason_display') {
-                const isSpecA = (a.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
-                const isSpecB = (b.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+                const isSpecA = (a.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
+                const isSpecB = (b.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
                 valA = (isSpecA && a.file_no2) ? String(a.file_no2) : String(a.reason || '-');
                 valB = (isSpecB && b.file_no2) ? String(b.file_no2) : String(b.reason || '-');
             } else { valA = String(a[key] || ""); valB = String(b[key] || ""); }
@@ -460,7 +460,7 @@ async function loadDataFromServer(startDate, endDate) {
                 const declNo = String(d.decl_no || "").toLowerCase();
                 const hblNo = String(d.hbl_no || "").toLowerCase();
                 const traderName = String(d.trader_name || "").toLowerCase();
-                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+                const isSpecialStatus = (d.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
                 const reasonText = String((isSpecialStatus && d.file_no2) ? d.file_no2 : (d.reason || '-')).toLowerCase();
                 const match = searchTerms.some(term => declNo.includes(term) || hblNo.includes(term) || traderName.includes(term) || reasonText.includes(term));
                 if (!match) return false;
@@ -480,9 +480,9 @@ async function loadDataFromServer(startDate, endDate) {
 
                 if (currentStatusFilter === 'UNREPORTED') return displayStatus === '미신고';
                 if (currentStatusFilter === 'REPAIR') return status === '수리';
-                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제/);
+                if (currentStatusFilter === 'WAIT') return status.match(/선별|대기|신고접수|제출|전제|결재/);
                 if (currentStatusFilter === 'ERROR') return status.includes('오류');
-                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보/);
+                if (currentStatusFilter === 'HOLD') return status.match(/미결|보완|보류|서변|서보|담변/);
             }
             return true;
         });
@@ -526,7 +526,7 @@ async function loadDataFromServer(startDate, endDate) {
             const badgeClass = getBadgeClass(statusText);
             const dStr = String(row.issue_date || "").replace(/[^0-9]/g, "");
             const formattedDate = dStr.length >= 8 ? `${dStr.substring(0,4)}-${dStr.substring(4,6)}-${dStr.substring(6,8)}` : dStr;
-            const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+            const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|담변/);
             const reasonText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '-');
             tr.innerHTML = `<td>${formattedDate}</td><td>${row.hbl_no}</td><td style="text-align:left;">${row.trader_name}</td><td><span class="status-badge ${badgeClass}">${statusText}</span></td><td style="text-align:left; color:#e03131;">${reasonText}</td>`;
             tr.onclick = () => { document.querySelectorAll('tr').forEach(r => r.classList.remove('selected')); tr.classList.add('selected'); showDetail(row); };
@@ -557,7 +557,7 @@ async function loadDataFromServer(startDate, endDate) {
         document.getElementById('det_agent').innerText = row.agent_nm || '-';
         document.getElementById('det_weight').innerText = row.weight || '-';
         document.getElementById('det_amount').innerText = row.amount || '-';
-        const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보/);
+        const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
         document.getElementById('det_reason').innerText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '특이사항 없음');
         const { data: { user } } = await _supabase.auth.getUser();
         const myEmail = user?.email;
