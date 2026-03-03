@@ -248,7 +248,7 @@ let allData = [];
         }
 
         // 4. 정렬 및 개수 제한
-        sql += ` ORDER BY issue_date DESC LIMIT 2000`;
+        sql += ` ORDER BY issue_date DESC LIMIT 100000`;
 
         try {
             // 5. queryD1 호출 (더 이상 while 루프가 필요 없습니다)
