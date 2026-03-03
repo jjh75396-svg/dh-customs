@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <link rel="icon" href="web.png" type="image/x-icon">
     <title>수입통관 통합 조회</title>
-    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         body { font-family: 'Malgun Gothic', sans-serif; margin: 10px 20px; background-color: #f5f7fa; color: #333; }
@@ -166,106 +165,135 @@
 </div>
 
 <script>
-    const authMap = {
-        "admin@admin.com": "ALL",
-        "ht@ht.com": "포에스홀딩스",
-        "sinter@sinter.com": "에스인터"
-    };
 
-    const SUPABASE_URL = "https://rxjjtwtwqisyzuwfbsfm.supabase.co".trim();
-    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ4amp0d3R3cWlzeXp1d2Zic2ZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzQ1MzEsImV4cCI6MjA4MjMxMDUzMX0.XZWjh_RklpRvVPPbgyciKsqJQdJMvD4AewmJBl_zot0".replace(/\s/g, "");
-
-    const { createClient } = supabase;
-    const _supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-        auth: { storage: window.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
-    });
-
-    let allData = [];
+let allData = [];
     let filteredData = [];
+    let currentUser = null;
     let currentStatusFilter = 'ALL';
     let currentPage = 1;
     const itemsPerPage = 100;
     let currentSort = { key: 'issue_date', asc: false };
 
+    // [2] D1 통신 함수
+    async function queryD1(sql) {
+        try {
+            const response = await fetch('https://solitary-sky-fb91.jjh75396.workers.dev//query', { // 본인의 URL로 수정
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: sql })
+            });
+            const result = await response.json();
+            return result.results || [];
+        } catch (err) {
+            console.error("D1 Error:", err);
+            return [];
+        }
+    }
+
+    // [3] 세션 체크 함수 (중괄호 오류 수정)
     async function checkSession() {
-        const { data: { session } } = await _supabase.auth.getSession();
-        if (session) {
+        const saved = localStorage.getItem('d1_session');
+        if (saved) {
+            currentUser = JSON.parse(saved);
             document.getElementById('login-overlay').style.display = 'none';
             document.getElementById('main-app').style.display = 'block';
-            document.getElementById('display-user-email').innerText = `👤 ${session.user.email}`;
+            document.getElementById('display-user-email').innerText = `👤 ${currentUser.email}`;
             init();
         }
     }
 
     async function handleLogout() {
-        await _supabase.auth.signOut();
+        localStorage.removeItem('d1_session');
         location.reload();
     }
 
+    // [4] 로그인 처리 함수
     async function handleLogin() {
         const email = document.getElementById('email').value.trim();
         const password = document.getElementById('pw').value;
         const btn = document.getElementById('login-btn');
-        if(!email || !password) return alert("아이디와 비밀번호를 입력하세요.");
+        if(!email || !password) return alert("입력 정보 부족");
         btn.disabled = true; btn.innerText = "접속 중...";
         try {
-            const { data, error } = await _supabase.auth.signInWithPassword({ email, password });
-            if (error) throw error;
-            document.getElementById('login-overlay').style.display = 'none';
-            document.getElementById('main-app').style.display = 'block';
-            document.getElementById('display-user-email').innerText = `👤 ${data.user.email}`;
-            init();
-        } catch (err) {
-            alert("로그인 실패: " + err.message);
-            btn.disabled = false; btn.innerText = "접속하기";
-        }
+            const result = await queryD1(`SELECT * FROM users WHERE email='${email}' AND password='${password}' LIMIT 1`);
+            if (result && result.length > 0) {
+                currentUser = { email: result[0].email, agent: result[0].agent_nm };
+                localStorage.setItem('d1_session', JSON.stringify(currentUser));
+                document.getElementById('login-overlay').style.display = 'none';
+                document.getElementById('main-app').style.display = 'block';
+                document.getElementById('display-user-email').innerText = `👤 ${currentUser.email}`;
+                init();
+            } else { alert("로그인 정보 불일치"); }
+        } finally { btn.disabled = false; btn.innerText = "접속하기"; }
     }
 
+// [수정] D1용으로 완전히 새로 작성된 데이터 로드 함수
+    async function loadDataFromServer(startDate, endDate) {
+        // 1. 세션 체크
+        if (!currentUser) {
+            console.error("로그인 정보가 없습니다.");
+            return [];
+        }
+
+        const sVal = startDate.replace(/-/g, "");
+        const eVal = endDate.replace(/-/g, "");
+        const allowedAgent = currentUser.agent; 
+
+        // 2. D1용 SQL 쿼리 작성 (is_deleted가 0인 것만)
+        let sql = `SELECT * FROM customs_clearance WHERE issue_date >= '${sVal}' AND issue_date <= '${eVal}' AND is_deleted = 0`;
+
+        // 3. 소속 권한 필터링
+        if (allowedAgent && allowedAgent !== "ALL") {
+            sql += ` AND agent_nm = '${allowedAgent}'`;
+        }
+
+        // 4. 정렬 및 개수 제한
+        sql += ` ORDER BY issue_date DESC LIMIT 2000`;
+
+        try {
+            // 5. queryD1 호출 (더 이상 while 루프가 필요 없습니다)
+            const data = await queryD1(sql);
+            return data || [];
+        } catch (err) {
+            console.error("데이터 로드 중 오류 발생:", err);
+            return [];
+        }
+}
+
+// 1. 상세 데이터를 가져와서 모달을 띄우는 함수
+async function showDetail(declNo) {
+    try {
+        const result = await queryD1(`SELECT * FROM customs_clearance WHERE decl_no = '${declNo}' LIMIT 1`);
+        const data = result && result.length > 0 ? result[0] : null;
+
+        if (!data) {
+            alert("데이터를 불러올 수 없습니다.");
+            return;
+        }
+
+        // 상세 모달을 띄우는 함수 호출 (이미 만들어두신 modal 관련 함수가 있다면 연결)
+        openDetailModal(data); 
+    } catch (e) {
+        console.error("상세조회 에러:", e);
+    }
+} // <--- showDetail 함수 끝
+
+// 2. 서버에서 데이터를 로드하고 중복을 제거하는 함수
 async function loadDataFromServer(startDate, endDate) {
-    const { data: { user } } = await _supabase.auth.getUser();
-    if (!user) return [];
-    
-    const email = user.email;
-    const allowedAgent = authMap[email];
+    if (!currentUser) return [];
+
     const sVal = startDate.replace(/-/g, "");
     const eVal = endDate.replace(/-/g, "");
-
-    // [수정] 함수 호출 시마다 바구니를 빈 상태로 시작합니다.
-    let allFetchedData = []; 
-    let from = 0;
-    const step = 1000;
-    let hasMore = true;
-
-    while (hasMore) {
-        let query = _supabase
-            .from('customs_clearance')
-            .select('*')
-            .or('is_deleted.is.null,is_deleted.eq.false')
-            .gte('issue_date', sVal)
-            .lte('issue_date', eVal)
-            .range(from, from + step - 1);
-
-        if (allowedAgent && allowedAgent !== "ALL") {
-            query = query.eq('agent_nm', allowedAgent);
-        }
-
-        const { data, error } = await query;
-        if (error) {
-            console.error("데이터 로드 오류:", error);
-            break;
-        }
-
-        if (data && data.length > 0) {
-            // 이번 요청에서 받은 데이터만 추가
-            allFetchedData = allFetchedData.concat(data);
-            if (data.length < step) hasMore = false;
-            else from += step;
-        } else {
-            hasMore = false;
-        }
+    
+    let sql = `SELECT * FROM customs_clearance WHERE issue_date >= '${sVal}' AND issue_date <= '${eVal}' AND is_deleted = 0`;
+    if (currentUser.agent !== "ALL") {
+        sql += ` AND agent_nm = '${currentUser.agent}'`;
     }
+    sql += ` ORDER BY issue_date DESC LIMIT 2000`;
 
-    // [추가 보안] decl_no를 기준으로 최종 중복 제거 (브라우저 메모리 보호)
+    const allFetchedData = await queryD1(sql);
+
+    // [중복 제거 로직] 여기서 수행합니다.
     const uniqueMap = new Map();
     allFetchedData.forEach(item => {
         if (!uniqueMap.has(item.decl_no)) {
@@ -297,10 +325,17 @@ async function loadDataFromServer(startDate, endDate) {
     };
 
     async function showUnconfirmedAlerts() {
-        const { data: { user } } = await _supabase.auth.getUser();
-        const myEmail = user?.email;
-        const unconfirmed = allData.filter(d => d.memo && d.memo.trim() !== "" && !d.checked && d.last_writer !== myEmail);
+        if (!currentUser) return;
+        const myEmail = currentUser.email;
+
+        const unconfirmed = allData.filter(d => 
+            d.memo && d.memo.trim() !== "" && 
+            !d.checked && 
+            d.last_writer !== myEmail
+        );
+
         if (unconfirmed.length === 0) return;
+
         const win = window.open("", "MemoPopup", "width=600,height=600,scrollbars=yes");
         let html = `<html><head><title>미확인 메모 알림</title><style>body { font-family: 'Malgun Gothic', sans-serif; padding: 20px; background: #f8f9fa; }.title { font-size: 18px; font-weight: bold; color: #d63301; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }.item { background: white; padding: 15px; margin-bottom: 10px; border-radius: 8px; border: 1px solid #ddd; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }.info { font-size: 13px; color: #0056b3; font-weight: bold; }.reason { font-size: 12px; color: #666; margin-top: 4px; }.memo { font-size: 13px; color: #333; margin-top: 8px; padding-top: 8px; border-top: 1px dotted #eee; }.btn-group { display: flex; flex-direction: column; gap: 5px; margin-left: 15px; }.btn-check { padding: 6px 12px; background: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-go { padding: 6px 12px; background: #0056b3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }.btn-close { width: 100%; padding: 10px; background: #eee; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; }</style></head><body><div class="title">📢 미확인 메모 알림</div><div id="popup-list">`;
         unconfirmed.forEach(item => {
@@ -313,27 +348,39 @@ async function loadDataFromServer(startDate, endDate) {
     }
 
     window.confirmFromPopup = async function(declNo) {
-        const { error } = await _supabase.from('customs_clearance').update({ checked: true }).eq('decl_no', declNo);
-        if (!error) {
-            const target = allData.find(d => d.decl_no === declNo);
-            if (target) target.checked = true;
-            if (window.memoPopup && !window.memoPopup.closed) {
-                window.memoPopup.removeRow(declNo);
-            }
+        await queryD1(`UPDATE customs_clearance SET checked=1 WHERE decl_no='${declNo}'`);
+        const target = allData.find(d => d.decl_no === declNo);
+        if (target) target.checked = true;
+        if (window.memoPopup && !window.memoPopup.closed) {
+            const el = window.memoPopup.document.getElementById('row-' + declNo);
+            if(el) el.remove();
         }
     };
 
     async function handleSearch() {
+        if (!currentUser) return;
+
         const sInput = document.getElementById('start-date').value;
         const eInput = document.getElementById('end-date').value;
+        const sDate = sInput.replace(/-/g, "");
+        const eDate = eInput.replace(/-/g, "");
         const rawInput = document.getElementById('search-input').value.trim().toLowerCase();
         const searchTerms = rawInput ? rawInput.split(/[\s,\n]+/).filter(t => t.length > 0) : [];
         const tbody = document.getElementById('list-body');
-        tbody.innerHTML = '<tr><td colspan="5">데이터를 불러오는 중...</td></tr>';    
-        allData = []; // 1. 데이터를 새로 받기 전에 기존 바구니를 싹 비웁니다.
-        allData = await loadDataFromServer(sInput, eInput); // 2. 그 다음 서버 데이터를 새로 채웁니다.
+        tbody.innerHTML = '<tr><td colspan="5">데이터를 불러오는 중...</td></tr>';
+        
+        let sql = `SELECT * FROM customs_clearance WHERE issue_date >= '${sDate}' AND issue_date <= '${eDate}' AND is_deleted = 0`;
+        
+        // 권한에 따른 필터 추가
+        if (currentUser.agent !== "ALL") {
+    sql += ` AND agent_nm = '${currentUser.agent}'`;
+}
+        
+        sql += ` ORDER BY issue_date DESC LIMIT 2000`;
+        
+        allData = await queryD1(sql);
 
-    renderTableAfterFilter();
+        renderTableAfterFilter();
 
         
         filteredData = allData.filter(d => {
@@ -373,40 +420,63 @@ async function loadDataFromServer(startDate, endDate) {
         renderTable();
     }
 
-    async function handleExcelUpload(event) {
+async function handleExcelUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        const { data: { user } } = await _supabase.auth.getUser();
-        const myEmail = user?.email;
+
+        // [수정] Supabase auth 대신 currentUser 사용
+        if (!currentUser) return alert("로그인이 필요합니다.");
+        const myEmail = currentUser.email;
+
         const reader = new FileReader();
         reader.onload = async (e) => {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
             const jsonData = XLSX.utils.sheet_to_json(sheet);
+
             let updateList = [];
             jsonData.forEach(row => {
+                // 엑셀 컬럼명 대응 (신고번호/메모 또는 decl_no/memo)
                 const declNo = row['신고번호'] || row['decl_no'];
                 const memo = row['메모'] || row['memo'];
                 if (declNo && memo !== undefined) {
-                    updateList.push({ decl_no: String(declNo).trim(), memo: String(memo).trim() });
+                    updateList.push({ 
+                        decl_no: String(declNo).trim(), 
+                        memo: String(memo).trim() 
+                    });
                 }
             });
+
             if (updateList.length === 0) return alert("업로드할 유효한 메모 데이터가 없습니다.");
+
             if (confirm(`${updateList.length}건의 메모를 일괄 업데이트하시겠습니까?`)) {
                 let successCount = 0;
+                
+                // [수정] 반복문을 돌며 D1 SQL 실행
                 for (const item of updateList) {
-                    const { error } = await _supabase.from('customs_clearance')
-                        .update({ memo: item.memo, checked: false, last_writer: myEmail })
-                        .eq('decl_no', item.decl_no);
-                    if (!error) successCount++;
+                    try {
+                        // SQL 인젝션 방지를 위해 홑따옴표 처리
+                        const safeMemo = item.memo.replace(/'/g, "''");
+                        const sql = `UPDATE customs_clearance 
+                                     SET memo = '${safeMemo}', 
+                                         checked = 0, 
+                                         last_writer = '${myEmail}' 
+                                     WHERE decl_no = '${item.decl_no}'`;
+                        
+                        await queryD1(sql);
+                        successCount++;
+                    } catch (err) {
+                        console.error(`업데이트 실패 (신고번호: ${item.decl_no}):`, err);
+                    }
                 }
+
                 alert(`${successCount}건의 메모가 업데이트되었습니다.`);
-                location.reload();
+                location.reload(); // 데이터 갱신을 위해 페이지 새로고침
             }
         };
         reader.readAsArrayBuffer(file);
-        event.target.value = '';
+        event.target.value = ''; // 파일 선택 초기화
     }
 
     function sortTable(key) {
@@ -559,7 +629,7 @@ async function loadDataFromServer(startDate, endDate) {
         document.getElementById('det_amount').innerText = row.amount || '-';
         const isSpecialStatus = (row.status || '').match(/진행중|신고전|미결|보완|보류|서변|서보|결재|담변/);
         document.getElementById('det_reason').innerText = (isSpecialStatus && row.file_no2) ? row.file_no2 : (row.reason || '특이사항 없음');
-        const { data: { user } } = await _supabase.auth.getUser();
+        const user = currentUser; 
         const myEmail = user?.email;
         const isAdmin = myEmail === 'admin@admin.com';
         const memoInput = document.getElementById('memo-input');
@@ -579,69 +649,76 @@ async function loadDataFromServer(startDate, endDate) {
         } else { confirmBtn.style.display = 'none'; }
     }
 
-    async function deleteRow(declNo) {
+async function deleteRow(declNo) {
         if (!confirm("해당 신고건을 삭제하시겠습니까?")) return;
-        const { error } = await _supabase.from('customs_clearance').update({ is_deleted: true }).eq('decl_no', declNo);
-        if (!error) {
+
+        try {
+            // [수정] _supabase 대신 D1 SQL 쿼리 사용
+            // is_deleted를 1(true)로 업데이트하여 논리적 삭제를 수행합니다.
+            const sql = `UPDATE customs_clearance SET is_deleted = 1 WHERE decl_no = '${declNo}'`;
+            await queryD1(sql);
+
             alert("삭제되었습니다.");
+
+            // 로컬 데이터(allData)에서 해당 항목 제거 후 화면 갱신
             allData = allData.filter(d => d.decl_no !== declNo);
             handleSearch();
+
+            // 상세 페이지 정보 초기화
             document.querySelectorAll('.detail-content').forEach(el => el.innerText = '');
-            document.getElementById('memo-input').disabled = true;
-            document.getElementById('btn-save-memo').style.display = 'none';
+            const memoInput = document.getElementById('memo-input');
+            if (memoInput) memoInput.disabled = true;
+            
+            const btnSave = document.getElementById('btn-save-memo');
+            if (btnSave) btnSave.style.display = 'none';
+
+        } catch (err) {
+            console.error("삭제 중 오류 발생:", err);
+            alert("삭제 처리에 실패했습니다.");
         }
     }
 
     async function saveMemo(declNo, memoValue, myEmail) {
         const statusSpan = document.getElementById('save-status');
-        const { error } = await _supabase.from('customs_clearance').update({ memo: memoValue, checked: false, last_writer: myEmail }).eq('decl_no', declNo);
-        if (!error) {
-            statusSpan.style.display = 'inline'; setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
+        const safeMemo = String(memoValue).replace(/'/g, "''");
+        const sql = `UPDATE customs_clearance SET memo='${safeMemo}', checked=0, last_writer='${myEmail}' WHERE decl_no='${declNo}'`;
+        await queryD1(sql);
+
+            statusSpan.style.display = 'inline'; 
+            setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
+
             const target = allData.find(d => d.decl_no === declNo);
-            if(target) { target.memo = memoValue; target.last_writer = myEmail; target.checked = false; }
-            document.getElementById('btn-confirm-memo').style.display = 'none';
+            if(target) { 
+            target.memo = memoValue; 
+            target.last_writer = myEmail; 
+            target.checked = false; 
         }
+	document.getElementById('btn-confirm-memo').style.display = 'none';
     }
 
     async function confirmInPage(declNo) {
-        const { error } = await _supabase.from('customs_clearance').update({ checked: true }).eq('decl_no', declNo);
-        if (!error) {
-            const target = allData.find(d => d.decl_no === declNo);
-            if (target) target.checked = true;
-            document.getElementById('btn-confirm-memo').style.display = 'none';
-        }
+        await queryD1(`UPDATE customs_clearance SET checked=1 WHERE decl_no='${declNo}'`);
+        const target = allData.find(d => d.decl_no === declNo);
+        if (target) target.checked = true;
+        document.getElementById('btn-confirm-memo').style.display = 'none';
     }
 
-// --- 여기에 자동 새로고침 코드를 추가하세요 ---
-// --- 이 영역만 교체하세요 (다른 UI/기능 변경 없음) ---
-// 코드 맨 아래의 setInterval 부분을 이 내용으로 교체하세요
-setInterval(async function() { 
-    const { data: { session } } = await _supabase.auth.getSession();
-    
-    if (session) {
+
+    setInterval(async function() { 
+    if (currentUser) {
         console.log("데이터 자동 동기화 및 메모 체크 중...");
         
-        // 1. 테이블 갱신 (현재 조회 중인 날짜 유지)
-        const sInput = document.getElementById('start-date').value.replace(/-/g, '');
-        const eInput = document.getElementById('end-date').value.replace(/-/g, '');
-        const newData = await loadDataFromServer(sInput, eInput);
-        
-        if (newData) {
-            allData = newData; 
-            renderTableAfterFilter(); 
-        }
+        await handleSearch();
 
         // 2. 팝업 알림용 (날짜 상관없이 전체 미확인 메모 조회)
-        const myEmail = session.user.email;
-        const { data: globalMemos, error } = await _supabase
-            .from('customs_clearance')
-            .select('*')
-            .not('memo', 'is', null)
-            .neq('memo', '')
-            .eq('checked', false)
-            .neq('last_writer', myEmail);
+        const myEmail = currentUser.email;
+        let sql = "SELECT * FROM customs_clearance WHERE memo IS NOT NULL AND memo != '' AND checked = 0 AND last_writer != '" + myEmail + "'";
+        if (currentUser.agent !== "ALL") {
+            sql += " AND agent_nm = '" + currentUser.agent + "'";
+        }
 
-        if (!error && globalMemos && globalMemos.length > 0) {
+        const globalMemos = await queryD1(sql);
+        if (globalMemos && globalMemos.length > 0) {
             // 핵심: 백업 -> 데이터 교체 -> 기다림(await) -> 복구
             const tempBackup = allData;
             allData = globalMemos; 
