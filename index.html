@@ -289,7 +289,7 @@ async function loadDataFromServer(startDate, endDate) {
     if (currentUser.agent !== "ALL") {
         sql += ` AND agent_nm = '${currentUser.agent}'`;
     }
-    sql += ` ORDER BY issue_date DESC LIMIT 2000`;
+    sql += ` ORDER BY issue_date DESC LIMIT 100000`;
 
     const allFetchedData = await queryD1(sql);
 
@@ -376,7 +376,7 @@ async function loadDataFromServer(startDate, endDate) {
     sql += ` AND agent_nm = '${currentUser.agent}'`;
 }
         
-        sql += ` ORDER BY issue_date DESC LIMIT 2000`;
+        sql += ` ORDER BY issue_date DESC LIMIT 100000`;
         
         allData = await queryD1(sql);
 
@@ -685,7 +685,7 @@ async function deleteRow(declNo) {
         await queryD1(sql);
 
             statusSpan.style.display = 'inline'; 
-            setTimeout(() => { statusSpan.style.display = 'none'; }, 2000);
+            setTimeout(() => { statusSpan.style.display = 'none'; }, 100000);
 
             const target = allData.find(d => d.decl_no === declNo);
             if(target) { 
