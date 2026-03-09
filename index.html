@@ -177,7 +177,7 @@ let allData = [];
     // [2] D1 통신 함수
     async function queryD1(sql) {
         try {
-            const response = await fetch('https://solitary-sky-fb91.jjh75396.workers.dev/query', { // 본인의 URL로 수정
+            const response = await fetch('https://solitary-sky-fb91.jjh75396.workers.dev', { // 본인의 URL로 수정
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sql: sql })
