@@ -173,6 +173,7 @@ let allData = [];
     let currentPage = 1;
     const itemsPerPage = 100;
     let currentSort = { key: 'issue_date', asc: false };
+    let lastCheckTime = new Date().toISOString();
 
     // [2] D1 통신 함수
     async function queryD1(sql) {
@@ -704,31 +705,59 @@ async function deleteRow(declNo) {
     }
 
 
-    setInterval(async function() { 
-    if (currentUser) {
-        console.log("데이터 자동 동기화 및 메모 체크 중...");
-        
-        await handleSearch();
+setInterval(async function() { 
+    if (!currentUser) return;
 
-        // 2. 팝업 알림용 (날짜 상관없이 전체 미확인 메모 조회)
+    try {
         const myEmail = currentUser.email;
-        let sql = "SELECT * FROM customs_clearance WHERE memo IS NOT NULL AND memo != '' AND checked = 0 AND last_writer != '" + myEmail + "'";
+
+        // [파트 1] 변경된 데이터만 1번의 요청으로 싹 가져오기
+        // 1,000건이 바뀌었어도 이 쿼리 한 번으로 다 가져옵니다.
+        let updateSql = `SELECT * FROM customs_clearance WHERE edit_dt_time > '${lastCheckTime}'`;
         if (currentUser.agent !== "ALL") {
-            sql += " AND agent_nm = '" + currentUser.agent + "'";
+            updateSql += ` AND agent_nm = '${currentUser.agent}'`;
         }
 
-        const globalMemos = await queryD1(sql);
+        const changedItems = await queryD1(updateSql);
+
+        if (changedItems && changedItems.length > 0) {
+            console.log(`${changedItems.length}건의 변경사항을 한 번에 업데이트합니다.`);
+            
+            changedItems.forEach(newItem => {
+                const index = allData.findIndex(d => d.decl_no === newItem.decl_no);
+                if (index !== -1) {
+                    allData[index] = newItem; // 기존 데이터 교체
+                } else {
+                    allData.unshift(newItem); // 새 데이터면 추가
+                }
+            });
+            
+            // 기준점을 최신으로 갱신하여 다음엔 그 이후 것만 보게 함
+            lastCheckTime = new Date().toISOString();
+            renderTable(currentPage); 
+        }
+
+        // [파트 2] 팝업 알림 (날짜 상관없이 전체 미확인 메모 조회)
+        // 사용자가 요청한 대로 '전체 기간'에 대해 나 이외의 사람이 쓴 미확인 메모를 찾습니다.
+        let alertSql = "SELECT * FROM customs_clearance WHERE memo IS NOT NULL AND memo != '' AND checked = 0 AND last_writer != '" + myEmail + "'";
+        if (currentUser.agent !== "ALL") {
+            alertSql += " AND agent_nm = '" + currentUser.agent + "'";
+        }
+
+        const globalMemos = await queryD1(alertSql);
+        
         if (globalMemos && globalMemos.length > 0) {
-            // 핵심: 백업 -> 데이터 교체 -> 기다림(await) -> 복구
             const tempBackup = allData;
             allData = globalMemos; 
-            
-            await showUnconfirmedAlerts(); 
-            
+            await showUnconfirmedAlerts(); // 팝업 띄우기
             allData = tempBackup;
+            renderTable(currentPage);
         }
+
+    } catch (err) {
+        console.error("자동 동기화 중 에러:", err);
     }
-}, 600000); // 60초 주기
+}, 600000); // 10분 주기
 
 
     document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
