@@ -312,7 +312,6 @@ async function loadDataFromServer(startDate, endDate) {
         document.getElementById('start-date').value = lastWeek.toISOString().split('T')[0];
         document.getElementById('end-date').value = today.toISOString().split('T')[0];
         await handleSearch();
-        showUnconfirmedAlerts();
     }
 
     window.goToTarget = function(hblNo, declNo) {
@@ -754,10 +753,28 @@ setInterval(async function() {
     } catch (err) {
         console.error("자동 동기화 중 에러:", err);
     }
-}, 60000); // 10분 주기
+}, 600000); // 10분 주기
 
 
+    // 기존 코드 하단부
     document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
+    
+    // 💡 여기에 추가: 10분 기다리지 않고 즉시 메모 체크 함수 실행
+    async function checkMemosImmediately() {
+        if (!currentUser) return;
+        const myEmail = currentUser.email;
+        let alertSql = "SELECT * FROM customs_clearance WHERE memo IS NOT NULL AND memo != '' AND checked = 0 AND last_writer != '" + myEmail + "'";
+        if (currentUser.agent !== "ALL") {
+            alertSql += " AND agent_nm = '" + currentUser.agent + "'";
+        }
+        const globalMemos = await queryD1(alertSql);
+        if (globalMemos && globalMemos.length > 0) {
+            await showUnconfirmedAlerts(globalMemos);
+        }
+    }
+    // 로그인 체크 후 바로 실행되도록 호출
+    setTimeout(checkMemosImmediately, 10000); // 로그인 데이터 로드 시간을 고려해 2초 후 실행
+
     checkSession();
 </script>
 </body>
