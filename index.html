@@ -754,7 +754,7 @@ setInterval(async function() {
     } catch (err) {
         console.error("자동 동기화 중 에러:", err);
     }
-}, 600000); // 10분 주기
+}, 60000); // 10분 주기
 
 
     document.getElementById('search-input').addEventListener('keypress', (e) => { if (e.key === 'Enter') handleSearch(); });
