@@ -325,15 +325,12 @@ async function loadDataFromServer(startDate, endDate) {
         }
     };
 
-    async function showUnconfirmedAlerts() {
-        if (!currentUser) return;
-        const myEmail = currentUser.email;
+async function showUnconfirmedAlerts(memoData) {
+    if (!currentUser || !memoData || memoData.length === 0) return;
+    const myEmail = currentUser.email;
 
-        const unconfirmed = allData.filter(d => 
-            d.memo && d.memo.trim() !== "" && 
-            !d.checked && 
-            d.last_writer !== myEmail
-        );
+    // allData.filter 대신 전달받은 memoData를 바로 사용합니다.
+    const unconfirmed = memoData;
 
         if (unconfirmed.length === 0) return;
 
@@ -747,12 +744,12 @@ setInterval(async function() {
         const globalMemos = await queryD1(alertSql);
         
         if (globalMemos && globalMemos.length > 0) {
-            const tempBackup = allData;
-            allData = globalMemos; 
-            await showUnconfirmedAlerts(); // 팝업 띄우기
-            allData = tempBackup;
-            renderTable(currentPage);
+            // 💡 백업/복구 없이 데이터만 인자로 보냅니다.
+            await showUnconfirmedAlerts(globalMemos); 
         }
+
+        // 💡 중요: 그냥 그리는 게 아니라 현재 사용자의 필터(날짜, 검색어 등)를 재적용합니다.
+        renderTableAfterFilter();
 
     } catch (err) {
         console.error("자동 동기화 중 에러:", err);
