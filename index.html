@@ -701,59 +701,51 @@ async function deleteRow(declNo) {
     }
 
 
+// ✅ 수정 후: 데이터 동기화와 메모 알림을 완벽히 분리
 setInterval(async function() { 
     if (!currentUser) return;
 
     try {
         const myEmail = currentUser.email;
 
-        // [파트 1] 변경된 데이터만 1번의 요청으로 싹 가져오기
-        // 1,000건이 바뀌었어도 이 쿼리 한 번으로 다 가져옵니다.
-        let updateSql = `SELECT * FROM customs_clearance WHERE edit_dt_time > '${lastCheckTime}'`;
+        // [파트 1] 순수 데이터 업데이트 (최근 1시간 내 변경분만)
+        let oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+        let updateSql = `SELECT * FROM customs_clearance WHERE edit_dt_time > '${oneHourAgo}'`;
         if (currentUser.agent !== "ALL") {
             updateSql += ` AND agent_nm = '${currentUser.agent}'`;
         }
 
-        const changedItems = await queryD1(updateSql);
-
-        if (changedItems && changedItems.length > 0) {
-            console.log(`${changedItems.length}건의 변경사항을 한 번에 업데이트합니다.`);
-            
-            changedItems.forEach(newItem => {
+        const syncItems = await queryD1(updateSql);
+        if (syncItems && syncItems.length > 0) {
+            syncItems.forEach(newItem => {
                 const index = allData.findIndex(d => d.decl_no === newItem.decl_no);
                 if (index !== -1) {
-                    allData[index] = newItem; // 기존 데이터 교체
-                } else {
-                    allData.unshift(newItem); // 새 데이터면 추가
+                    allData[index] = newItem; // 화면에 있는 데이터면 내용만 갱신
                 }
+                // 💡 else(unshift)를 제거하여 필터 밖의 과거 데이터 유입을 차단합니다.
             });
-            
-            // 기준점을 최신으로 갱신하여 다음엔 그 이후 것만 보게 함
             lastCheckTime = new Date().toISOString();
-            renderTable(currentPage); 
         }
 
-        // [파트 2] 팝업 알림 (날짜 상관없이 전체 미확인 메모 조회)
-        // 사용자가 요청한 대로 '전체 기간'에 대해 나 이외의 사람이 쓴 미확인 메모를 찾습니다.
+        // [파트 2] 메모 알림 (전체 기간 조회, 하지만 바구니에는 안 넣음)
         let alertSql = "SELECT * FROM customs_clearance WHERE memo IS NOT NULL AND memo != '' AND checked = 0 AND last_writer != '" + myEmail + "'";
         if (currentUser.agent !== "ALL") {
             alertSql += " AND agent_nm = '" + currentUser.agent + "'";
         }
 
         const globalMemos = await queryD1(alertSql);
-        
         if (globalMemos && globalMemos.length > 0) {
-            // 💡 백업/복구 없이 데이터만 인자로 보냅니다.
+            // 💡 globalMemos는 팝업 함수에만 전달하고 끝냅니다.
             await showUnconfirmedAlerts(globalMemos); 
         }
 
-        // 💡 중요: 그냥 그리는 게 아니라 현재 사용자의 필터(날짜, 검색어 등)를 재적용합니다.
+        // [파트 3] 화면 유지 (사용자가 설정한 날짜/검색 필터 강제 재적용)
         renderTableAfterFilter();
 
     } catch (err) {
         console.error("자동 동기화 중 에러:", err);
     }
-}, 600000); // 10분 주기
+}, 600000);
 
 
     // 기존 코드 하단부
